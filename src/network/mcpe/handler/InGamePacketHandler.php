@@ -543,8 +543,9 @@ class InGamePacketHandler extends PacketHandler{
 			array_push($blocks, ...$sidePos->sidesArray());
 		}
 		$world = $this->player->getWorld();
-		$blockTranslator = TypeConverter::getInstance()->getBlockTranslator();
-		foreach ($world->createBlockUpdatePackets($blocks) as $packet) {
+		$typeConverter = $this->session->getTypeConverter();
+		$blockTranslator = $typeConverter->getBlockTranslator();
+		foreach ($world->createBlockUpdatePackets($typeConverter, $blocks) as $packet) {
 			if (count($oldBlockSnapshot) > 0 && $packet instanceof UpdateBlockPacket) {
 				$hash = World::blockHash(
 					$packet->blockPosition->getX(),
