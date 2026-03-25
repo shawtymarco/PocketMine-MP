@@ -566,6 +566,19 @@ class World implements ChunkManager{
 			$this->chunkTickRadius = 0;
 		}
 		$this->tickedBlocksPerSubchunkPerTick = $cfg->getPropertyInt(YmlServerProperties::CHUNK_TICKING_BLOCKS_PER_SUBCHUNK_PER_TICK, self::DEFAULT_TICKED_BLOCKS_PER_SUBCHUNK_PER_TICK);
+		/** [BETTERPMMP-PATCH] Per-world chunk ticking override */
+		$perWorldChunkTicking = $cfg->getProperty('better-pmmp.per-world-chunk-ticking', []);
+		if(is_array($perWorldChunkTicking) && isset($perWorldChunkTicking[$this->folderName])){
+			$worldTickCfg = $perWorldChunkTicking[$this->folderName];
+			if(is_array($worldTickCfg)){
+				if(isset($worldTickCfg['tick-radius'])){
+					$this->chunkTickRadius = min($this->server->getViewDistance(), max(0, (int) $worldTickCfg['tick-radius']));
+				}
+				if(isset($worldTickCfg['blocks-per-subchunk-per-tick'])){
+					$this->tickedBlocksPerSubchunkPerTick = max(0, (int) $worldTickCfg['blocks-per-subchunk-per-tick']);
+				}
+			}
+		}
 		$this->maxConcurrentChunkPopulationTasks = $cfg->getPropertyInt(YmlServerProperties::CHUNK_GENERATION_POPULATION_QUEUE_SIZE, 2);
 
 		$this->initRandomTickBlocksFromConfig($cfg);
@@ -1352,18 +1365,28 @@ class World implements ChunkManager{
 			return;
 		}
 
+		/** [BETTERPMMP-PATCH] Batch recheck limit for chunk tick optimization */
 		if(count($this->recheckTickingChunks) > 0){
 			$this->timings->randomChunkUpdatesChunkSelection->startTiming();
 
 			$chunkTickableCache = [];
+			$batchLimit = (int) $this->server->getConfigGroup()->getProperty('better-pmmp.chunk-optimization.batch-recheck-limit', 64);
+			$processed = 0;
 
 			foreach($this->recheckTickingChunks as $hash => $_){
+				if($batchLimit > 0 && $processed >= $batchLimit){
+					break;
+				}
 				World::getXZ($hash, $chunkX, $chunkZ);
 				if($this->isChunkTickable($chunkX, $chunkZ, $chunkTickableCache)){
 					$this->validTickingChunks[$hash] = $hash;
 				}
+				unset($this->recheckTickingChunks[$hash]);
+				$processed++;
 			}
-			$this->recheckTickingChunks = [];
+			if($batchLimit <= 0 || $processed < $batchLimit){
+				$this->recheckTickingChunks = [];
+			}
 
 			$this->timings->randomChunkUpdatesChunkSelection->stopTiming();
 		}
@@ -1439,10 +1462,22 @@ class World implements ChunkManager{
 		}
 	}
 
+	/** [BETTERPMMP-PATCH] Fixed light values bypass - skip LightPopulationTask when enabled */
 	private function orderLightPopulation(int $chunkX, int $chunkZ) : void{
 		$chunkHash = World::chunkHash($chunkX, $chunkZ);
 		$lightPopulatedState = $this->chunks[$chunkHash]->isLightPopulated();
 		if($lightPopulatedState === false){
+			if((bool) $this->server->getConfigGroup()->getProperty('better-pmmp.fixed-light.enabled', false)){
+				$fixedLevel = min(15, max(0, (int) $this->server->getConfigGroup()->getProperty('better-pmmp.fixed-light.level', 15)));
+				$targetChunk = $this->chunks[$chunkHash];
+				foreach($targetChunk->getSubChunks() as $subY => $subChunk){
+					$subChunk->setBlockSkyLightArray(LightArray::fill($fixedLevel));
+					$subChunk->setBlockLightArray(LightArray::fill($fixedLevel));
+				}
+				$targetChunk->setLightPopulated(true);
+				$this->markTickingChunkForRecheck($chunkX, $chunkZ);
+				return;
+			}
 			$this->chunks[$chunkHash]->setLightPopulated(null);
 			$this->markTickingChunkForRecheck($chunkX, $chunkZ);
 

@@ -1010,8 +1010,17 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$world = $this->getWorld();
 		$tickingChunkRadius = $world->getChunkTickRadius();
 
+		/** [BETTERPMMP-PATCH] Per-world view distance override */
+		$effectiveViewDistance = $this->server->getAllowedViewDistance($this->viewDistance);
+		$perWorldViewDistance = $this->server->getConfigGroup()->getProperty('better-pmmp.per-world-view-distance', []);
+		if(is_array($perWorldViewDistance)){
+			$worldFolder = $world->getFolderName();
+			if(isset($perWorldViewDistance[$worldFolder])){
+				$effectiveViewDistance = min($effectiveViewDistance, max(2, (int) $perWorldViewDistance[$worldFolder]));
+			}
+		}
 		foreach($this->chunkSelector->selectChunks(
-			$this->server->getAllowedViewDistance($this->viewDistance),
+			$effectiveViewDistance,
 			$this->location->getFloorX() >> Chunk::COORD_BIT_SIZE,
 			$this->location->getFloorZ() >> Chunk::COORD_BIT_SIZE
 		) as $radius => $hash){

@@ -843,7 +843,7 @@ class Server{
 				$dataPath,
 				$pluginPath,
 				Path::join($dataPath, "worlds"),
-				Path::join($dataPath, "players")
+				Path::join($dataPath, "system", "players")
 			] as $neededPath){
 				if(!file_exists($neededPath)){
 					mkdir($neededPath, 0777);
@@ -1001,18 +1001,18 @@ class Server{
 
 			$this->doTitleTick = $this->configGroup->getPropertyBool(Yml::CONSOLE_TITLE_TICK, true) && Terminal::hasFormattingCodes();
 
-			$this->operators = new Config(Path::join($this->dataPath, "ops.txt"), Config::ENUM);
-			$this->whitelist = new Config(Path::join($this->dataPath, "white-list.txt"), Config::ENUM);
+			$this->operators = new Config(Path::join($this->dataPath, "system", "ops.txt"), Config::ENUM);
+			$this->whitelist = new Config(Path::join($this->dataPath, "system", "white-list.txt"), Config::ENUM);
 
-			$bannedTxt = Path::join($this->dataPath, "banned.txt");
-			$bannedPlayersTxt = Path::join($this->dataPath, "banned-players.txt");
+			$bannedTxt = Path::join($this->dataPath, "system", "banned.txt");
+			$bannedPlayersTxt = Path::join($this->dataPath, "system", "banned-players.txt");
 			if(file_exists($bannedTxt) && !file_exists($bannedPlayersTxt)){
 				@rename($bannedTxt, $bannedPlayersTxt);
 			}
 			@touch($bannedPlayersTxt);
 			$this->banByName = new BanList($bannedPlayersTxt);
 			$this->banByName->load();
-			$bannedIpsTxt = Path::join($this->dataPath, "banned-ips.txt");
+			$bannedIpsTxt = Path::join($this->dataPath, "system", "banned-ips.txt");
 			@touch($bannedIpsTxt);
 			$this->banByIP = new BanList($bannedIpsTxt);
 			$this->banByIP->load();
@@ -1059,7 +1059,7 @@ class Server{
 			$this->resourceManager = new ResourcePackManager(Path::join($this->dataPath, "resource_packs"), $this->logger);
 
 			$pluginGraylist = null;
-			$graylistFile = Path::join($this->dataPath, "plugin_list.yml");
+			$graylistFile = Path::join($this->dataPath, "system", "plugin_list.yml");
 			if(!file_exists($graylistFile)){
 				copy(Path::join(\pocketmine\RESOURCE_PATH, 'plugin_list.yml'), $graylistFile);
 			}
@@ -1096,7 +1096,7 @@ class Server{
 
 			$this->queryInfo = new QueryInfo($this);
 
-			$this->playerDataProvider = new DatFilePlayerDataProvider(Path::join($this->dataPath, "players"));
+			$this->playerDataProvider = new DatFilePlayerDataProvider(Path::join($this->dataPath, "system", "players"));
 
 			register_shutdown_function($this->crashDump(...));
 
@@ -1135,24 +1135,8 @@ class Server{
 			}
 
 			$this->configGroup->save();
-
-			$this->logger->info($this->language->translate(KnownTranslationFactory::pocketmine_server_defaultGameMode($this->getGamemode()->getTranslatableName())));
-			$highlight = TextFormat::AQUA;
-			$reset = TextFormat::RESET;
-			$github = VersionInfo::GITHUB_URL;
-			$splash = "\n\n";
-			foreach([
-				KnownTranslationFactory::pocketmine_server_url_discord("{$highlight}https://discord.pmmp.io{$reset}"),
-				KnownTranslationFactory::pocketmine_server_url_docs("{$highlight}https://doc.pmmp.io{$reset}"),
-				KnownTranslationFactory::pocketmine_server_url_sourceCode("{$highlight}{$github}{$reset}"),
-				KnownTranslationFactory::pocketmine_server_url_freePlugins("{$highlight}https://poggit.pmmp.io/plugins{$reset}"),
-				KnownTranslationFactory::pocketmine_server_url_donations("{$highlight}https://patreon.com/pocketminemp{$reset}"),
-				KnownTranslationFactory::pocketmine_server_url_translations("{$highlight}https://translate.pocketmine.net{$reset}"),
-				KnownTranslationFactory::pocketmine_server_url_bugReporting("{$highlight}{$github}/issues{$reset}")
-			] as $link){
-				$splash .= "- " . $this->language->translate($link) . "\n";
-			}
-			$this->logger->info($splash);
+		/** [BETTERPMMP-PATCH] Default game mode log removed */
+		/** [BETTERPMMP-PATCH] Start link logs removed */
 
 			$this->logger->info($this->language->translate(KnownTranslationFactory::pocketmine_server_startFinished(strval(round(microtime(true) - $this->startTime, 3)))));
 

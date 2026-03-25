@@ -208,3 +208,27 @@ plugins:
   #False will place plugin data under plugin_data under --data.
   #This option exists for backwards compatibility with existing installations.
   legacy-data-dir: false
+
+# [BETTERPMMP-PATCH] Extreme optimization settings
+better-pmmp:
+  # Fixed light: skip async LightPopulationTask entirely.
+  # Fills server-side light arrays with a fixed value instead of running BFS flood-fill on worker threads.
+  # Performance gain: eliminates AsyncTask submission, igbinary serialization, and BFS light calculation.
+  # NOTE: This does NOT affect client-side rendering. Bedrock clients calculate their own lighting.
+  # Server-side light values are used only for mob spawning conditions and similar server logic.
+  fixed-light:
+    enabled: false
+    level: 15
+  # Per-world view distance override. Overrides server.properties view-distance per world folder name.
+  # Example: lobby: 4
+  per-world-view-distance: {}
+  # Advanced chunk optimization settings.
+  chunk-optimization:
+    # Max chunks to recheck tick eligibility per tick. Prevents tick spikes on mass teleport. 0 = unlimited.
+    batch-recheck-limit: 64
+  # Per-world chunk ticking override. Overrides global chunk-ticking settings per world folder name.
+  # Example:
+  #   lobby:
+  #     tick-radius: 0
+  #     blocks-per-subchunk-per-tick: 0
+  per-world-chunk-ticking: {}

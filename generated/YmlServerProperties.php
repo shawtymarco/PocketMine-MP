@@ -109,5 +109,15 @@ final class YmlServerProperties{
 	public const TICKS_PER_AUTOSAVE = 'ticks-per.autosave';
 	public const TIMINGS = 'timings';
 	public const TIMINGS_HOST = 'timings.host';
+	/** [BETTERPMMP-PATCH] BetterPMMP optimization config constants */
+	public const BETTER_PMMP = 'better-pmmp';
+	public const BETTER_PMMP_FIXED_LIGHT = 'better-pmmp.fixed-light';
+	public const BETTER_PMMP_FIXED_LIGHT_ENABLED = 'better-pmmp.fixed-light.enabled';
+	public const BETTER_PMMP_FIXED_LIGHT_LEVEL = 'better-pmmp.fixed-light.level';
+	public const BETTER_PMMP_PER_WORLD_VIEW_DISTANCE = 'better-pmmp.per-world-view-distance';
+	public const BETTER_PMMP_CHUNK_OPTIMIZATION = 'better-pmmp.chunk-optimization';
+	public const BETTER_PMMP_CHUNK_OPTIMIZATION_BATCH_RECHECK_LIMIT = 'better-pmmp.chunk-optimization.batch-recheck-limit';
+	public const BETTER_PMMP_PER_WORLD_CHUNK_TICKING = 'better-pmmp.per-world-chunk-ticking';
+
 	public const WORLDS = 'worlds';
 }
