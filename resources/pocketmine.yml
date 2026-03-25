@@ -217,7 +217,7 @@ better-pmmp:
   # NOTE: This does NOT affect client-side rendering. Bedrock clients calculate their own lighting.
   # Server-side light values are used only for mob spawning conditions and similar server logic.
   fixed-light:
-    enabled: false
+    enabled: true
     level: 15
   # Per-world view distance override. Overrides server.properties view-distance per world folder name.
   # Example: lobby: 4
