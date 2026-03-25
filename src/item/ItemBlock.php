@@ -35,7 +35,7 @@ use pocketmine\data\runtime\RuntimeDataDescriber;
  */
 final class ItemBlock extends Item{
 	public function __construct(
-		private Block $block
+		public Block $block
 	){
 		parent::__construct(ItemIdentifier::fromBlock($block), $block->getName(), $block->getEnchantmentTags());
 	}
