@@ -1720,7 +1720,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$oldItem = clone $item;
 
 		$ev = new PlayerItemUseEvent($this, $item, $directionVector);
-		if($this->hasItemCooldown($item) || $this->isSpectator()){
+		if($this->hasItemCooldown($item)){
 			$ev->cancel();
 		}
 
