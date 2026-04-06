@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "da8c0b0df69c12e60439a72c6577aa3a",
+    "content-hash": "7d79f7704dc3fc48c87eacfd9a3073ab",
     "packages": [
         {
             "name": "adhocore/json-comment",
@@ -156,12 +156,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/NetherGamesMC/BedrockProtocol.git",
-                "reference": "a0c605a2c9851542ac467b536faa1b29468fc798"
+                "reference": "c74f98b242b6ec697d917910be62bb6f085d9cca"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/NetherGamesMC/BedrockProtocol/zipball/a0c605a2c9851542ac467b536faa1b29468fc798",
-                "reference": "a0c605a2c9851542ac467b536faa1b29468fc798",
+                "url": "https://api.github.com/repos/NetherGamesMC/BedrockProtocol/zipball/c74f98b242b6ec697d917910be62bb6f085d9cca",
+                "reference": "c74f98b242b6ec697d917910be62bb6f085d9cca",
                 "shasum": ""
             },
             "require": {
@@ -204,7 +204,7 @@
             "support": {
                 "source": "https://github.com/NetherGamesMC/BedrockProtocol/tree/master"
             },
-            "time": "2026-03-25T02:17:48+00:00"
+            "time": "2026-04-05T11:54:58+00:00"
         },
         {
             "name": "netresearch/jsonmapper",
@@ -1191,11 +1191,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.1.42",
+            "version": "2.1.46",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/1279e1ce86ba768f0780c9d889852b4e02ff40d0",
-                "reference": "1279e1ce86ba768f0780c9d889852b4e02ff40d0",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/a193923fc2d6325ef4e741cf3af8c3e8f54dbf25",
+                "reference": "a193923fc2d6325ef4e741cf3af8c3e8f54dbf25",
                 "shasum": ""
             },
             "require": {
@@ -1240,7 +1240,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-03-17T14:58:32+00:00"
+            "time": "2026-04-01T09:25:14+00:00"
         },
         {
             "name": "phpstan/phpstan-phpunit",
