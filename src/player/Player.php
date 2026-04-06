@@ -300,12 +300,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	protected ?int $lineHeight = null;
 	protected string $locale = "en_US";
 
-	/** @var int Java-style countdown timer for item use. -1 = not using. */
-	protected int $useItemRemaining = -1;
-	/** @var int Max use duration set when item use begins (Java: 72000 for bows). */
-	protected int $useItemMaxDuration = 0;
-	/** @var Item|null Snapshot of the item when use started, for per-tick validation. */
-	protected ?Item $useItem = null;
+	protected int $startAction = -1;
 
 	/**
 	 * @phpstan-var array<int|string, int>
@@ -744,20 +739,11 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 * Returns whether the player is currently using an item (right-click and hold).
 	 */
 	public function isUsingItem() : bool{
-		return $this->useItemRemaining > -1;
+		return $this->startAction > -1;
 	}
 
 	public function setUsingItem(bool $value) : void{
-		if($value){
-			$item = $this->inventory->getItemInHand();
-			$this->useItem = clone $item;
-			$this->useItemMaxDuration = 72000; // Java BowItem.getUseDuration()
-			$this->useItemRemaining = $this->useItemMaxDuration;
-		}else{
-			$this->useItemRemaining = -1;
-			$this->useItemMaxDuration = 0;
-			$this->useItem = null;
-		}
+		$this->startAction = $value ? $this->server->getTick() : -1;
 		$this->networkPropertiesDirty = true;
 	}
 
@@ -766,34 +752,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 * for bows.
 	 */
 	public function getItemUseDuration() : int{
-		return $this->useItemRemaining === -1 ? -1 : ($this->useItemMaxDuration - $this->useItemRemaining);
-	}
-
-	/**
-	 * Returns the remaining ticks of item use (Java-style countdown).
-	 */
-	public function getUseItemRemainingTicks() : int{
-		return $this->useItemRemaining;
-	}
-
-	/**
-	 * Java-style per-tick validation of item use state.
-	 * Validates the held item still matches and decrements the use timer.
-	 */
-	private function updateUsingItem(int $tickDiff) : void{
-		if($this->useItemRemaining <= -1){
-			return;
-		}
-
-		// Java LivingEntity.updatingUsingItem(): cancel if held item type changed
-		$currentItem = $this->inventory->getItemInHand();
-		if($this->useItem !== null && $currentItem->getTypeId() !== $this->useItem->getTypeId()){
-			$this->setUsingItem(false);
-			return;
-		}
-
-		// Decrement countdown (Java-style: --useItemRemaining each tick)
-		$this->useItemRemaining = max(0, $this->useItemRemaining - $tickDiff);
+		return $this->startAction === -1 ? -1 : ($this->server->getTick() - $this->startAction);
 	}
 
 	/**
@@ -1607,8 +1566,6 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			if($this->blockBreakHandler !== null && !$this->blockBreakHandler->update()){
 				$this->blockBreakHandler = null;
 			}
-
-			$this->updateUsingItem($tickDiff);
 
 			if($this->isUsingItem() && $this->getItemUseDuration() % 4 === 0 && ($item = $this->inventory->getItemInHand()) instanceof ConsumableItem){
 				$this->broadcastAnimation(new ConsumingItemAnimation($this, $item));
@@ -2724,7 +2681,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	protected function syncNetworkData(EntityMetadataCollection $properties) : void{
 		parent::syncNetworkData($properties);
 
-		$properties->setGenericFlag(EntityMetadataFlags::ACTION, $this->useItemRemaining > -1);
+		$properties->setGenericFlag(EntityMetadataFlags::ACTION, $this->startAction > -1);
 		$properties->setGenericFlag(EntityMetadataFlags::HAS_COLLISION, $this->hasBlockCollision());
 
 		$properties->setPlayerFlag(PlayerMetadataFlags::SLEEP, $this->sleeping !== null);
