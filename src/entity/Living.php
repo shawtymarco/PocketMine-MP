@@ -111,6 +111,12 @@ abstract class Living extends Entity{
 
 	protected int $attackTime = 0;
 
+	protected PositionHistory $positionHistory;
+
+	public function getPositionHistory() : PositionHistory{
+		return $this->positionHistory;
+	}
+
 	public int $deadTicks = 0;
 	protected int $maxDeadTicks = 25;
 
@@ -148,6 +154,8 @@ abstract class Living extends Entity{
 
 	protected function initEntity(CompoundTag $nbt) : void{
 		parent::initEntity($nbt);
+
+		$this->positionHistory = new PositionHistory();
 
 		$this->effectManager = new EffectManager($this);
 		$this->effectManager->getEffectAddHooks()->add(function() : void{ $this->networkPropertiesDirty = true; });
@@ -672,6 +680,12 @@ abstract class Living extends Entity{
 		Timings::$livingEntityBaseTick->startTiming();
 
 		$hasUpdate = parent::entityBaseTick($tickDiff);
+
+		// Record position for lag-compensated hit registration
+		$this->positionHistory->record(
+			$this->getWorld()->getServer()->getTick(),
+			$this->location->asVector3()
+		);
 
 		if($this->isAlive()){
 			if($this->effectManager->tick($tickDiff)){

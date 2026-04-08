@@ -2000,7 +2000,20 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$oldItem = clone $heldItem;
 
 		$ev = new EntityDamageByEntityEvent($this, $entity, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $heldItem->getAttackPoints());
-		if(!$this->canInteract($entity->getLocation(), self::MAX_REACH_DISTANCE_ENTITY_INTERACTION)){
+		$reachPos = $entity->getLocation();
+		if($entity instanceof Living){
+			$pingMs = $this->getNetworkSession()->getPing();
+			if($pingMs !== null && $pingMs > 0){
+				$rewindTicks = (int) min(ceil($pingMs / 50), 4); // cap at 4 ticks (200ms)
+				$historicalPos = $entity->getPositionHistory()->getPositionAtTick(
+					$this->server->getTick() - $rewindTicks
+				);
+				if($historicalPos !== null){
+					$reachPos = $historicalPos;
+				}
+			}
+		}
+		if(!$this->canInteract($reachPos, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION)){
 			$this->logger->debug("Cancelled attack of entity " . $entity->getId() . " due to not currently being interactable");
 			$ev->cancel();
 		}elseif($this->isSpectator() || ($entity instanceof Player && !$this->server->getConfigGroup()->getConfigBool(ServerProperties::PVP))){
