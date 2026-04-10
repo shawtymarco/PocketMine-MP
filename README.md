@@ -1,84 +1,221 @@
-<p align="center">
-	<a href="https://pmmp.io">
-		<!--[if IE]>
-			<img src="https://github.com/pmmp/PocketMine-MP/blob/stable/.github/readme/pocketmine.png" alt="The PocketMine-MP logo" title="PocketMine" loading="eager" />
-		<![endif]-->
-		<picture>
-			<source srcset="https://raw.githubusercontent.com/pmmp/PocketMine-MP/stable/.github/readme/pocketmine-dark-rgb.gif" media="(prefers-color-scheme: dark)">
-			<img src="https://raw.githubusercontent.com/pmmp/PocketMine-MP/stable/.github/readme/pocketmine-rgb.gif" loading="eager" />
-		</picture>
-	</a><br>
-	<b>A highly customisable, open source server software for Minecraft: Bedrock Edition written in PHP</b>
-</p>
+# PocketMine-MP (shawtymarco Fork)
 
-<p align="center">
-	<a href="https://github.com/pmmp/PocketMine-MP/actions/workflows/main.yml"><img src="https://github.com/pmmp/PocketMine-MP/actions/workflows/main.yml/badge.svg" alt="CI" /></a>
-	<a href="https://github.com/pmmp/PocketMine-MP/releases/latest"><img alt="GitHub release (latest SemVer)" src="https://img.shields.io/github/v/release/pmmp/PocketMine-MP?label=release&sort=semver"></a>
-	<a href="https://discord.gg/bmSAZBG"><img src="https://img.shields.io/discord/373199722573201408?label=discord&color=7289DA&logo=discord" alt="Discord" /></a>
-	<br>
-	<a href="https://github.com/pmmp/PocketMine-MP/releases"><img alt="GitHub all releases" src="https://img.shields.io/github/downloads/pmmp/PocketMine-MP/total?label=downloads%40total"></a>
-	<a href="https://github.com/pmmp/PocketMine-MP/releases/latest"><img alt="GitHub release (latest by SemVer)" src="https://img.shields.io/github/downloads/pmmp/PocketMine-MP/latest/total?sort=semver"></a>
-</p>
+Fork of [NetherGamesMC/PocketMine-MP](https://github.com/NetherGamesMC/PocketMine-MP) with gameplay patches for competitive Bedrock servers.
 
-## What is this?
-PocketMine-MP is a highly customisable server software for Minecraft: Bedrock Edition, built from scratch in PHP, with over 10 years of history.
+Maintained by [@shawtymarco](https://github.com/shawtymarco). Compiled into `PocketMine.phar` via `Archived/Scripts/build_phar.php`.
 
-If you're looking to create a Minecraft: Bedrock server with **custom functionality**, look no further.
+## Patches
 
-- 🧩 **Powerful plugin API** - extend and customise gameplay as you see fit
-- 🗺️ **Rich ecosystem** and **large developer community** - find plugins easily and learn to develop your own
-- 🌐 **Multi-world support** - offer a more varied game experience to players without transferring them to other server nodes
-- 🏎️ **Performance** - get 100+ players onto one server (depending on hardware and plugins)
-- ⤴️ **Continuously updated** - new Minecraft versions are usually supported within days
+### Lag-Compensated Hit Registration
 
-## :x: PocketMine-MP is NOT a vanilla Minecraft server software.
-**It is poorly suited to hosting vanilla survival servers.**
-It doesn't have many features from the vanilla game, such as vanilla world generation, redstone, mob AI, and various other things.
+[`f472f22`](https://github.com/shawtymarco/PocketMine-MP/commit/f472f22)
 
-If you just want to play **vanilla survival multiplayer**, consider using the [official Minecraft: Bedrock server software](https://minecraft.net/download/server/bedrock) instead of PocketMine-MP.
+Adds a `PositionHistory` ring buffer to all `Living` entities. `Player::attackEntity()` rewinds the target's position by the attacker's ping for reach validation, reducing ghost hits under latency.
 
-If that's not an option for you, you may be able to add some of PocketMine-MP's missing features using plugins from [Poggit](https://poggit.pmmp.io/plugins), or write plugins to implement them yourself.
+**New file: `src/entity/PositionHistory.php`**
 
-## Getting Started
-- [Documentation](http://pmmp.readthedocs.org/)
-- [Installation instructions](https://pmmp.readthedocs.io/en/rtfd/installation.html)
-- [Docker image](https://github.com/pmmp/PocketMine-MP/pkgs/container/pocketmine-mp)
-- [Plugin repository](https://poggit.pmmp.io/plugins)
+Ring buffer storing entity positions indexed by server tick. Keeps up to 20 ticks (1 second). `getPositionAtTick()` returns the closest recorded position to the requested tick.
 
-## Community & Support
-Join our [Discord](https://discord.gg/bmSAZBG) server to chat with other users and developers.
+```php
+final class PositionHistory{
+    private const MAX_TICKS = 20;
+    /** @var array<int, Vector3> tick => position */
+    private array $history = [];
+    public function record(int $tick, Vector3 $pos) : void;
+    public function getPositionAtTick(int $tick) : ?Vector3;
+}
+```
 
-You can also post questions on [StackOverflow](https://stackoverflow.com/tags/pocketmine) under the tag `pocketmine`.
+**`src/entity/Living.php`**
 
-## Developing Plugins
-If you want to write your own plugins, the following resources may be useful.
-Don't forget you can always ask our community if you need help.
+New `PositionHistory $positionHistory` property initialized in `initEntity()`, exposed via `getPositionHistory()`.
 
- * [Developer documentation](https://devdoc.pmmp.io) - General documentation for PocketMine-MP plugin developers
- * [Latest release API documentation](https://apidoc.pmmp.io) - Doxygen API documentation generated for each release
- * [Latest bleeding-edge API documentation](https://apidoc-dev.pmmp.io) - Doxygen API documentation generated weekly from `major-next` branch
- * [DevTools](https://github.com/pmmp/DevTools/) - Development tools plugin for creating plugins
- * [ExamplePlugin](https://github.com/pmmp/ExamplePlugin/) - Example plugin demonstrating some basic API features
+**`src/player/Player.php` — `attackEntity()`**
 
-## Contributing to PocketMine-MP
-PocketMine-MP accepts community contributions! The following resources will be useful if you want to contribute to PocketMine-MP.
- * [Building and running PocketMine-MP from source](BUILDING.md)
- * [Contributing Guidelines](CONTRIBUTING.md)
+Calculates rewind ticks from the attacker's ping (capped at 4 ticks / 200 ms), fetches the target's historical position, and uses that for reach validation instead of the current position:
 
-New here? Check out [issues with the "Easy task" label](https://github.com/pmmp/PocketMine-MP/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22Easy%20task%22) for things you could work to familiarise yourself with the codebase.
+```php
+$rewindTicks = (int) min(ceil($pingMs / 50), 4);
+$historicalPos = $entity->getPositionHistory()->getPositionAtTick(
+    $this->server->getTick() - $rewindTicks
+);
+```
 
-## Donate
-PocketMine-MP is free, but it requires a lot of time and effort from unpaid volunteers to develop. Donations enable us to keep delivering support for new versions and adding features your players love.
+---
 
-You can support development using the following methods:
+### Bow Charging Robustness
 
-- [Patreon](https://www.patreon.com/pocketminemp)
-- Bitcoin (BTC): `bc1q2v5ngyf8ugyd55kqa9ep35g2rv342ueqm6ks33`
-- Stellar Lumens (XLM): `GAAC5WZ33HCTE3BFJFZJXONMEIBNHFLBXM2HJVAZHXXPYA3HP5XPPS7T`
+A series of fixes making bow charging reliable under high-ping conditions, matching Java Edition behavior.
 
-Thanks for your support!
+**`src/item/Bow.php` — Allow short charge releases** [`8a6950c`](https://github.com/shawtymarco/PocketMine-MP/commit/8a6950c)
 
-## Licensing information
-This project is licensed under LGPL-3.0. Please see the [LICENSE](/LICENSE) file for details.
+Removes the minimum charge tick threshold so short bow pulls still fire. Force is calculated from `getItemUseDuration()` tick delta — near-zero pulls produce near-zero force naturally via the quadratic formula `(p^2 + p*2) / 3`.
 
-pmmp/PocketMine are not affiliated with Mojang. All brands and trademarks belong to their respective owners. PocketMine-MP is not a Mojang-approved software, nor is it associated with Mojang.
+**`src/network/mcpe/handler/InGamePacketHandler.php` — No interrupt on repeat click** [`c04b08c`](https://github.com/shawtymarco/PocketMine-MP/commit/c04b08c)
+
+`ACTION_CLICK_AIR` while already using an item no longer resets the use state for Releasable items. Only GoatHorns (which complete client-side without a release packet) clear the flag immediately:
+
+```php
+if($this->player->isUsingItem()){
+    // ... consume logic ...
+    if($heldItem instanceof GoatHorn){
+        $this->player->setUsingItem(false);
+    }
+    return true;
+}
+```
+
+**`src/player/Player.php` — Block interaction no longer cancels charge** [`b2bbdbf`](https://github.com/shawtymarco/PocketMine-MP/commit/b2bbdbf)
+
+`interactBlock()` only calls `setUsingItem(false)` if the player is NOT holding a `Releasable` item. Bow charging persists through block interaction packets that Bedrock clients interleave under latency:
+
+```php
+if(!($this->isUsingItem() && $this->inventory->getItemInHand() instanceof Releasable)){
+    $this->setUsingItem(false);
+}
+```
+
+**`src/player/Player.php` — Inventory listener scoped to held slot** [`b2bbdbf`](https://github.com/shawtymarco/PocketMine-MP/commit/b2bbdbf)
+
+The `onContentChange` listener only cancels item use when the held slot's contents actually changed, not on any inventory content change:
+
+```php
+function(Inventory $unused, array $oldContents) : void{
+    $heldIndex = $this->inventory->getHeldItemIndex();
+    if(!isset($oldContents[$heldIndex]) ||
+       !$oldContents[$heldIndex]->equalsExact($this->inventory->getItem($heldIndex))){
+        $this->setUsingItem(false);
+    }
+}
+```
+
+**Note:** A Java-style countdown timer approach ([`c9b9ac9`](https://github.com/shawtymarco/PocketMine-MP/commit/c9b9ac9)) was attempted but reverted ([`96d8c1d`](https://github.com/shawtymarco/PocketMine-MP/commit/96d8c1d)) because it felt worse in practice. The original `startAction` tick-delta calculation is retained.
+
+---
+
+### Spectator Item Use Event
+
+[`4e14959`](https://github.com/shawtymarco/PocketMine-MP/commit/4e14959)
+
+**`src/player/Player.php` — `useHeldItem()`**
+
+`PlayerItemUseEvent` fires unconditionally with no spectator-mode gate. Plugins can still cancel via `$ev->isCancelled()`, but the engine no longer silently blocks spectator item use. This enables custom spectator interactions (e.g. compass menu).
+
+---
+
+### Fall Damage Threshold
+
+[`00501aa`](https://github.com/shawtymarco/PocketMine-MP/commit/00501aa)
+
+**`src/entity/Living.php` — `calculateFallDamage()`**
+
+Threshold increased from 3 to 4 blocks before fall damage applies:
+
+```php
+return ceil($fallDistance - 4 - ($jumpBoost?->getEffectLevel() ?? 0));
+```
+
+---
+
+### Block Visibility Patch
+
+[`060e83f`](https://github.com/shawtymarco/PocketMine-MP/commit/060e83f)
+
+**`src/block/Block.php`**
+
+Exposes internal block state methods as `public` so plugins can encode/decode block states directly:
+
+- `public Block $defaultState` — stores the zero-state clone, set in `__construct()`
+- `public function decodeBlockItemState(int $data)` — restores block state from item data
+- `public function encodeBlockItemState() : int` — serializes block state to item data
+
+**`src/item/ItemBlock.php`**
+
+`public Block $block` — block reference exposed as public property.
+
+---
+
+### ItemBlock Subclassing
+
+[`443ac1f`](https://github.com/shawtymarco/PocketMine-MP/commit/443ac1f)
+
+**`src/item/ItemBlock.php`**
+
+Removes `final` from the class declaration, allowing plugins to extend `ItemBlock` with custom behavior.
+
+---
+
+### BetterPMMP Patches
+
+[`ba0bfbc`](https://github.com/shawtymarco/PocketMine-MP/commit/ba0bfbc), [`f320a5a`](https://github.com/shawtymarco/PocketMine-MP/commit/f320a5a)
+
+Large patch applying [BetterPMMP](https://github.com/UserX0001/BetterPMMP) optimizations. All additions are marked with `[BETTERPMMP-PATCH]` comments in source.
+
+#### Fixed Light
+
+**`resources/pocketmine.yml`** — Adds `fixed-light` config option (enabled by default). When active, skips light recalculation for static worlds.
+
+**`src/world/World.php`** — Chunk-based block cache, collision box cache, and optimized ticking chunk tracking (`registeredTickingChunks`, `validTickingChunks`).
+
+#### Input Lag Fix (Block Lag Fix)
+
+**`src/network/mcpe/handler/InGamePacketHandler.php`**
+
+Captures a block state snapshot before `interactBlock()`, then uses snapshot-based diffing in `syncBlocksNearby()` to send only changed blocks back to the client. Compares internal block IDs via `BlockTranslator::internalIdToNetworkId()` to skip unchanged blocks:
+
+```php
+$oldBlockSnapshot = $this->captureBlockSnapshot($vBlockPos, $data->getFace());
+$interactResult = $this->player->interactBlock(...);
+$this->syncBlocksNearby($vBlockPos, $syncAdjacentFace, $interactResult ? $oldBlockSnapshot : []);
+```
+
+#### Hot Reload
+
+New command `/reloadplugin <all|pluginName>` for live plugin reloading without server restart.
+
+| File | Role |
+|------|------|
+| `src/command/defaults/ReloadPluginCommand.php` | Command handler — accepts plugin name or `all`, calls `PluginManager::reloadPlugin()` or `reloadAll()` |
+| `src/plugin/PluginManager.php` | New `reloadPlugin()` and `reloadAll()` methods — unregisters handlers/commands/permissions, invalidates class cache, re-enables plugin |
+| `src/plugin/ClassCacheInvalidator.php` | Detects changed source files via mtime, clears OPcache, re-evals code with versioned namespaces (`MyPlugin\v1\MyClass`) for true class redefinition |
+| `src/plugin/PluginResourceIndex.php` | Central registry tracking each plugin's event handlers, commands, permissions, and scheduler tasks for safe cleanup on reload |
+| `src/plugin/PluginResources.php` | Data container holding a single plugin's tracked runtime artifacts |
+
+#### Restart
+
+**`src/command/defaults/RestartCommand.php`** — `/restart` command that creates a `restart.flag` file at the server root, broadcasts a shutdown message, and calls `Server::shutdown()`. The external startup script detects the flag and auto-restarts.
+
+#### Lazy Data Folder
+
+**`src/plugin/PluginBase.php`** — Plugin data folder creation deferred to first access. `getDataFolder()`, `saveResource()`, and `saveConfig()` all call `ensureDataFolderExists()` which `mkdir`s on demand instead of at plugin load time.
+
+#### Log Cleanup
+
+**`src/utils/MainLogger.php`** — INFO-level messages use a compact format with only timestamp and message (no thread name, no log level prefix). Other levels (DEBUG, WARNING, ERROR) retain the full format.
+
+#### Other
+
+**`src/Server.php`** — Removes default gamemode and startup link log lines.
+
+**`src/PocketMine.php`** — Replaces source-mode startup warning with BetterPMMP banner. Bypasses Composer sync check when running from source folder.
+
+---
+
+### syncBlocksNearby TypeConverter Fix
+
+[`10b0e1e`](https://github.com/shawtymarco/PocketMine-MP/commit/10b0e1e)
+
+**`src/network/mcpe/handler/InGamePacketHandler.php`**
+
+Passes `TypeConverter` (fetched from `$this->session->getTypeConverter()`) to `World::createBlockUpdatePackets()` in the `syncBlocksNearby()` method. Fixes a crash introduced by the BetterPMMP input lag patch.
+
+## Upstream Syncs
+
+| Commit | Source |
+|--------|--------|
+| [`c7cdd15`](https://github.com/shawtymarco/PocketMine-MP/commit/c7cdd15) | NetherGamesMC:stable |
+| [`de0c8fa`](https://github.com/shawtymarco/PocketMine-MP/commit/de0c8fa) | NetherGamesMC:stable |
+
+## License
+
+This project is licensed under LGPL-3.0. See the [LICENSE](/LICENSE) file for details.
