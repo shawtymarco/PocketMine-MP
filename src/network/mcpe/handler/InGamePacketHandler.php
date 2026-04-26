@@ -256,6 +256,7 @@ class InGamePacketHandler extends PacketHandler{
 
 		if(!$this->forceMoveSync && $hasMoved){
 			$this->lastPlayerAuthInputPosition = $rawPos;
+			$newPos = $this->applySpectatorVerticalFlightSpeed($newPos, $inputFlags);
 			//TODO: this packet has WAYYYYY more useful information that we're not using
 			$this->player->handleMovement($newPos);
 		}
@@ -382,6 +383,42 @@ class InGamePacketHandler extends PacketHandler{
 		}
 
 		return true;
+	}
+
+	private function applySpectatorVerticalFlightSpeed(Vector3 $newPos, BitSet $inputFlags) : Vector3{
+		if(!$this->player->isSpectator() || !$this->player->isFlying()){
+			return $newPos;
+		}
+
+		$flightSpeedMultiplier = $this->player->getFlightSpeedMultiplier();
+		if($flightSpeedMultiplier <= Player::DEFAULT_FLIGHT_SPEED_MULTIPLIER){
+			return $newPos;
+		}
+
+		$wantsUp = $inputFlags->get(PlayerAuthInputFlags::WANT_UP)
+			|| $inputFlags->get(PlayerAuthInputFlags::ASCEND)
+			|| $inputFlags->get(PlayerAuthInputFlags::JUMPING)
+			|| $inputFlags->get(PlayerAuthInputFlags::JUMP_DOWN)
+			|| $inputFlags->get(PlayerAuthInputFlags::START_JUMPING);
+		$wantsDown = $inputFlags->get(PlayerAuthInputFlags::WANT_DOWN)
+			|| $inputFlags->get(PlayerAuthInputFlags::DESCEND)
+			|| $inputFlags->get(PlayerAuthInputFlags::SNEAKING)
+			|| $inputFlags->get(PlayerAuthInputFlags::SNEAK_DOWN);
+		if($wantsUp === $wantsDown){
+			return $newPos;
+		}
+
+		$currentY = $this->player->getLocation()->y;
+		$rawDeltaY = $newPos->y - $currentY;
+		if($wantsUp && $rawDeltaY <= 0.0){
+			return $newPos;
+		}
+		if($wantsDown && $rawDeltaY >= 0.0){
+			return $newPos;
+		}
+
+		$scaledDeltaY = $rawDeltaY * ($flightSpeedMultiplier / Player::DEFAULT_FLIGHT_SPEED_MULTIPLIER);
+		return $newPos->withComponents(null, $currentY + $scaledDeltaY, null);
 	}
 
 	private function handleNormalTransaction(NormalTransactionData $data, int $itemStackRequestId) : bool{
