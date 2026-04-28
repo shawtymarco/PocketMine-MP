@@ -637,7 +637,7 @@ class InGamePacketHandler extends PacketHandler{
 				$this->player->interactEntity($target, $data->getClickPosition());
 				return true;
 			case UseItemOnEntityTransactionData::ACTION_ATTACK:
-				$this->player->attackEntity($target);
+				$this->player->attackEntity($target, $data->getClickPosition(), $data->getPlayerPosition());
 				return true;
 		}
 

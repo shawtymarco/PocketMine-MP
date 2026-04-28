@@ -12,7 +12,7 @@ use pocketmine\math\Vector3;
  */
 final class PositionHistory{
 
-	private const MAX_TICKS = 20; // 1 second at 20 TPS
+	private const MAX_TICKS = 40; // 2 seconds at 20 TPS
 
 	/** @var array<int, Vector3> tick => position */
 	private array $history = [];
@@ -52,6 +52,29 @@ final class PositionHistory{
 		}
 
 		return $bestTick !== null ? $this->history[$bestTick] : null;
+	}
+
+	/**
+	 * Returns whether the given point is plausible for this entity's recent hitbox path.
+	 */
+	public function isNearRecentHitbox(Vector3 $pos, EntitySizeInfo $size, int $currentTick, int $maxAgeTicks, float $margin) : bool{
+		$cutoff = $currentTick - $maxAgeTicks;
+		$halfWidth = ($size->getWidth() / 2) + $margin;
+		$height = $size->getHeight() + $margin;
+
+		foreach($this->history as $tick => $historyPos){
+			if($tick < $cutoff){
+				continue;
+			}
+			if(abs($pos->x - $historyPos->x) > $halfWidth || abs($pos->z - $historyPos->z) > $halfWidth){
+				continue;
+			}
+			if($pos->y >= $historyPos->y - $margin && $pos->y <= $historyPos->y + $height){
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	public function clear() : void{
