@@ -236,6 +236,13 @@ class World implements ChunkManager{
 	private int $minY;
 	private int $maxY;
 	private int $damageY;
+	private ?int $blockPlacementMinYInclusive = null;
+	private ?int $blockPlacementMaxYExclusive = null;
+	private ?string $blockPlacementBelowMinMessage = null;
+	private ?string $blockPlacementAboveMaxMessage = null;
+	private int $blockPlacementMessageCooldownTicks = 20;
+	/** @var array<string, int> player name => last message tick */
+	private array $blockPlacementMessageTicks = [];
 
 	/**
 	 * @var ChunkTicker[][] chunkHash => [spl_object_id => ChunkTicker]
@@ -2070,6 +2077,59 @@ class World implements ChunkManager{
 	}
 
 	/**
+	 * Sets custom player block-placement Y bounds without changing the world's real build height.
+	 */
+	public function setBlockPlacementYBounds(?int $minYInclusive, ?int $maxYExclusive, ?string $belowMinMessage = null, ?string $aboveMaxMessage = null, int $messageCooldownTicks = 20) : void{
+		$this->blockPlacementMinYInclusive = $minYInclusive;
+		$this->blockPlacementMaxYExclusive = $maxYExclusive;
+		$this->blockPlacementBelowMinMessage = $belowMinMessage;
+		$this->blockPlacementAboveMaxMessage = $aboveMaxMessage;
+		$this->blockPlacementMessageCooldownTicks = max(0, $messageCooldownTicks);
+		$this->blockPlacementMessageTicks = [];
+	}
+
+	/**
+	 * Clears custom player block-placement Y bounds.
+	 */
+	public function clearBlockPlacementYBounds() : void{
+		$this->setBlockPlacementYBounds(null, null, null, null);
+	}
+
+	private function checkBlockPlacementYBounds(int $y, ?Player $player) : bool{
+		if($player === null){
+			return true;
+		}
+
+		if($this->blockPlacementMinYInclusive !== null && $y < $this->blockPlacementMinYInclusive){
+			$this->sendBlockPlacementBoundsMessage($player, $this->blockPlacementBelowMinMessage);
+			return false;
+		}
+
+		if($this->blockPlacementMaxYExclusive !== null && $y >= $this->blockPlacementMaxYExclusive){
+			$this->sendBlockPlacementBoundsMessage($player, $this->blockPlacementAboveMaxMessage);
+			return false;
+		}
+
+		return true;
+	}
+
+	private function sendBlockPlacementBoundsMessage(?Player $player, ?string $message) : void{
+		if($player === null || $message === null || $message === ""){
+			return;
+		}
+
+		$playerName = $player->getName();
+		$currentTick = $this->server->getTick();
+		$lastMessageTick = $this->blockPlacementMessageTicks[$playerName] ?? null;
+		if($lastMessageTick !== null && $currentTick - $lastMessageTick < $this->blockPlacementMessageCooldownTicks){
+			return;
+		}
+
+		$this->blockPlacementMessageTicks[$playerName] = $currentTick;
+		$player->sendMessage($message);
+	}
+
+	/**
 	 * Gets the Block object at the Vector3 location. This method wraps around {@link getBlockAt}, converting the
 	 * vector components to integers.
 	 *
@@ -2450,6 +2510,10 @@ class World implements ChunkManager{
 		}
 
 		foreach($tx->getBlocks() as [$x, $y, $z, $block]){
+			if(!$this->checkBlockPlacementYBounds($y, $player)){
+				return false;
+			}
+
 			$block->position($this, $x, $y, $z);
 			foreach($block->getCollisionBoxes() as $collisionBox){
 				if(count($this->getCollidingEntities($collisionBox)) > 0){
