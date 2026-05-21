@@ -531,7 +531,10 @@ class InGamePacketHandler extends PacketHandler{
 				$interactResult = $this->player->interactBlock($vBlockPos, $data->getFace(), $clickPos);
 
 				$syncAdjacentFace = null;
-				if ($data->getItemInHand()->getItemStack()->getBlockRuntimeId() === ItemTranslator::NO_BLOCK_RUNTIME_ID) {
+				if (
+					!$interactResult ||
+					$data->getItemInHand()->getItemStack()->getBlockRuntimeId() === ItemTranslator::NO_BLOCK_RUNTIME_ID
+				) {
 					$syncAdjacentFace = $data->getFace();
 				}
 
