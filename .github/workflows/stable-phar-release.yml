@@ -16,7 +16,6 @@ concurrency:
 env:
   PHP_VERSION: "8.3"
   RELEASE_TAG: stable-latest
-  RELEASE_TITLE: Stable latest PHAR
 
 jobs:
   build-release:
@@ -50,6 +49,16 @@ jobs:
       - name: Build PocketMine-MP.phar
         run: php -dphar.readonly=0 build/server-phar.php --git ${{ github.sha }} --out PocketMine-MP.phar
 
+      - name: Get release metadata
+        id: release
+        run: |
+          PM_VERSION="$(php build/dump-version-info.php base_version)"
+          MCPE_VERSION="$(php build/dump-version-info.php mcpe_display_version)"
+
+          echo "pm_version=$PM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "mcpe_version=$MCPE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "title=PocketMine-MP $PM_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Verify PHAR
         run: |
           test -f PocketMine-MP.phar
@@ -63,17 +72,17 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
               --target "$GITHUB_SHA" \
-              --title "$RELEASE_TITLE" \
-              --notes "Automatically rebuilt from stable commit $GITHUB_SHA." \
-              --prerelease
+              --title "${{ steps.release.outputs.title }}" \
+              --notes "Automatically rebuilt from stable commit $GITHUB_SHA for Minecraft: Bedrock Edition ${{ steps.release.outputs.mcpe_version }}." \
+              --latest
           else
             git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
             git push -f origin "refs/tags/$RELEASE_TAG"
 
             gh release edit "$RELEASE_TAG" \
-              --title "$RELEASE_TITLE" \
-              --notes "Automatically rebuilt from stable commit $GITHUB_SHA." \
-              --prerelease
+              --title "${{ steps.release.outputs.title }}" \
+              --notes "Automatically rebuilt from stable commit $GITHUB_SHA for Minecraft: Bedrock Edition ${{ steps.release.outputs.mcpe_version }}." \
+              --latest
           fi
 
           gh release upload "$RELEASE_TAG" PocketMine-MP.phar PocketMine-MP.phar.sha256 --clobber
