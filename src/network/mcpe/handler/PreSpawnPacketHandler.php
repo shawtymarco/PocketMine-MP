@@ -117,11 +117,11 @@ class PreSpawnPacketHandler extends PacketHandler{
 				false,
 				false,
 				new NetworkPermissions(disableClientSounds: true),
+				false,
 				null,
 				new ServerTelemetryData("", "", "", ""),
 				[],
 				0,
-				$typeConverter->getItemTypeDictionary()->getEntries(),
 			));
 
 			if($this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_21_60){
