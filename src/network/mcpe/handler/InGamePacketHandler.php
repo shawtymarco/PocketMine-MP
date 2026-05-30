@@ -106,6 +106,7 @@ use pocketmine\utils\Utils;
 use pocketmine\world\format\Chunk;
 use pocketmine\world\World;
 use pocketmine\item\GoatHorn;
+use pocketmine\item\ItemUseResult;
 use function array_push;
 use function count;
 use function fmod;
@@ -543,7 +544,8 @@ class InGamePacketHandler extends PacketHandler{
 			case UseItemTransactionData::ACTION_CLICK_AIR:
 				if($this->player->isUsingItem()){
 					$heldItem = $this->player->getInventory()->getItemInHand();
-					if(!$this->player->consumeHeldItem()){
+					$result = $this->player->tryConsumeHeldItem();
+					if($result === ItemUseResult::FAIL){
 						$hungerAttr = $this->player->getAttributeMap()->get(Attribute::HUNGER) ?? throw new AssumptionFailedError();
 						$hungerAttr->markSynchronized(false);
 					}
