@@ -1,0 +1,88 @@
+name: Stable PHAR release
+
+on:
+  push:
+    branches:
+      - stable
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stable-phar-release
+  cancel-in-progress: false
+
+env:
+  PHP_VERSION: "8.3"
+  RELEASE_TAG: stable-latest
+
+jobs:
+  build-release:
+    name: Build and publish PocketMine-MP.phar
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@2.37.0
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore Composer cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/composer/files
+            ~/.cache/composer/vcs
+          key: composer-v2-cache-${{ hashFiles('composer.lock') }}
+          restore-keys: |
+            composer-v2-cache-
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --ignore-platform-reqs
+
+      - name: Build PocketMine-MP.phar
+        run: php -dphar.readonly=0 build/server-phar.php --git ${{ github.sha }} --out PocketMine-MP.phar
+
+      - name: Get release metadata
+        id: release
+        run: |
+          PM_VERSION="$(php build/dump-version-info.php base_version)"
+          MCPE_VERSION="$(php build/dump-version-info.php mcpe_display_version)"
+
+          echo "pm_version=$PM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "mcpe_version=$MCPE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "title=PocketMine-MP $PM_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify PHAR
+        run: |
+          test -f PocketMine-MP.phar
+          php -r '$p = new Phar("PocketMine-MP.phar"); echo "Files: ", count($p), PHP_EOL;'
+          sha256sum PocketMine-MP.phar | tee PocketMine-MP.phar.sha256
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "${{ steps.release.outputs.title }}" \
+              --notes "Automatically rebuilt from stable commit $GITHUB_SHA for Minecraft: Bedrock Edition ${{ steps.release.outputs.mcpe_version }}." \
+              --latest
+          else
+            git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
+            git push -f origin "refs/tags/$RELEASE_TAG"
+
+            gh release edit "$RELEASE_TAG" \
+              --title "${{ steps.release.outputs.title }}" \
+              --notes "Automatically rebuilt from stable commit $GITHUB_SHA for Minecraft: Bedrock Edition ${{ steps.release.outputs.mcpe_version }}." \
+              --latest
+          fi
+
+          gh release upload "$RELEASE_TAG" PocketMine-MP.phar PocketMine-MP.phar.sha256 --clobber

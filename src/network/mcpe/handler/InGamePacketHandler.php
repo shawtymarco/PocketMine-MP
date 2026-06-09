@@ -106,6 +106,7 @@ use pocketmine\utils\Utils;
 use pocketmine\world\format\Chunk;
 use pocketmine\world\World;
 use pocketmine\item\GoatHorn;
+use pocketmine\item\ItemUseResult;
 use function array_push;
 use function count;
 use function fmod;
@@ -256,6 +257,7 @@ class InGamePacketHandler extends PacketHandler{
 
 		if(!$this->forceMoveSync && $hasMoved){
 			$this->lastPlayerAuthInputPosition = $rawPos;
+			$newPos = $this->applySpectatorVerticalFlightSpeed($newPos, $inputFlags);
 			//TODO: this packet has WAYYYYY more useful information that we're not using
 			$this->player->handleMovement($newPos);
 		}
@@ -384,6 +386,42 @@ class InGamePacketHandler extends PacketHandler{
 		return true;
 	}
 
+	private function applySpectatorVerticalFlightSpeed(Vector3 $newPos, BitSet $inputFlags) : Vector3{
+		if(!$this->player->isSpectator() || !$this->player->isFlying()){
+			return $newPos;
+		}
+
+		$flightSpeedMultiplier = $this->player->getFlightSpeedMultiplier();
+		if($flightSpeedMultiplier <= Player::DEFAULT_FLIGHT_SPEED_MULTIPLIER){
+			return $newPos;
+		}
+
+		$wantsUp = $inputFlags->get(PlayerAuthInputFlags::WANT_UP)
+			|| $inputFlags->get(PlayerAuthInputFlags::ASCEND)
+			|| $inputFlags->get(PlayerAuthInputFlags::JUMPING)
+			|| $inputFlags->get(PlayerAuthInputFlags::JUMP_DOWN)
+			|| $inputFlags->get(PlayerAuthInputFlags::START_JUMPING);
+		$wantsDown = $inputFlags->get(PlayerAuthInputFlags::WANT_DOWN)
+			|| $inputFlags->get(PlayerAuthInputFlags::DESCEND)
+			|| $inputFlags->get(PlayerAuthInputFlags::SNEAKING)
+			|| $inputFlags->get(PlayerAuthInputFlags::SNEAK_DOWN);
+		if($wantsUp === $wantsDown){
+			return $newPos;
+		}
+
+		$currentY = $this->player->getLocation()->y;
+		$rawDeltaY = $newPos->y - $currentY;
+		if($wantsUp && $rawDeltaY <= 0.0){
+			return $newPos;
+		}
+		if($wantsDown && $rawDeltaY >= 0.0){
+			return $newPos;
+		}
+
+		$scaledDeltaY = $rawDeltaY * ($flightSpeedMultiplier / Player::DEFAULT_FLIGHT_SPEED_MULTIPLIER);
+		return $newPos->withComponents(null, $currentY + $scaledDeltaY, null);
+	}
+
 	private function handleNormalTransaction(NormalTransactionData $data, int $itemStackRequestId) : bool{
 		//When the ItemStackRequest system is used, this transaction type is used for dropping items by pressing Q.
 		//I don't know why they don't just use ItemStackRequest for that too, which already supports dropping items by
@@ -494,7 +532,10 @@ class InGamePacketHandler extends PacketHandler{
 				$interactResult = $this->player->interactBlock($vBlockPos, $data->getFace(), $clickPos);
 
 				$syncAdjacentFace = null;
-				if ($data->getItemInHand()->getItemStack()->getBlockRuntimeId() === ItemTranslator::NO_BLOCK_RUNTIME_ID) {
+				if (
+					!$interactResult ||
+					$data->getItemInHand()->getItemStack()->getBlockRuntimeId() === ItemTranslator::NO_BLOCK_RUNTIME_ID
+				) {
 					$syncAdjacentFace = $data->getFace();
 				}
 
@@ -503,7 +544,8 @@ class InGamePacketHandler extends PacketHandler{
 			case UseItemTransactionData::ACTION_CLICK_AIR:
 				if($this->player->isUsingItem()){
 					$heldItem = $this->player->getInventory()->getItemInHand();
-					if(!$this->player->consumeHeldItem()){
+					$result = $this->player->tryConsumeHeldItem();
+					if($result === ItemUseResult::FAIL){
 						$hungerAttr = $this->player->getAttributeMap()->get(Attribute::HUNGER) ?? throw new AssumptionFailedError();
 						$hungerAttr->markSynchronized(false);
 					}
@@ -600,7 +642,7 @@ class InGamePacketHandler extends PacketHandler{
 				$this->player->interactEntity($target, $data->getClickPosition());
 				return true;
 			case UseItemOnEntityTransactionData::ACTION_ATTACK:
-				$this->player->attackEntity($target);
+				$this->player->attackEntity($target, $data->getClickPosition(), $data->getPlayerPosition());
 				return true;
 		}
 

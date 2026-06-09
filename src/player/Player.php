@@ -1753,8 +1753,19 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 * @return bool if the consumption succeeded.
 	 */
 	public function consumeHeldItem() : bool{
+		return $this->tryConsumeHeldItem() === ItemUseResult::SUCCESS;
+	}
+
+	/**
+	 * Consumes the currently-held item if the item has been used for long enough.
+	 */
+	public function tryConsumeHeldItem() : ItemUseResult{
 		$slot = $this->inventory->getItemInHand();
 		if($slot instanceof ConsumableItem){
+			if($this->getItemUseDuration() < $slot->getConsumeDuration()){
+				return ItemUseResult::NONE;
+			}
+
 			$oldItem = clone $slot;
 
 			$residue = $slot->getResidue();
@@ -1765,7 +1776,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			$ev->call();
 
 			if($ev->isCancelled() || !$this->consumeObject($slot)){
-				return false;
+				return ItemUseResult::FAIL;
 			}
 
 			$this->setUsingItem(false);
@@ -1774,10 +1785,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			$slot->pop();
 			$this->returnItemsFromAction($oldItem, $slot, $ev->getResidue());
 
-			return true;
+			return ItemUseResult::SUCCESS;
 		}
 
-		return false;
+		return ItemUseResult::FAIL;
 	}
 
 	/**
@@ -1987,7 +1998,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 *
 	 * @return bool if the entity was dealt damage
 	 */
-	public function attackEntity(Entity $entity) : bool{
+	public function attackEntity(Entity $entity, ?Vector3 $clientClickPos = null, ?Vector3 $clientPlayerPos = null) : bool{
 		if(!$entity->isAlive()){
 			return false;
 		}
@@ -2001,10 +2012,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 
 		$ev = new EntityDamageByEntityEvent($this, $entity, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $heldItem->getAttackPoints());
 		$reachPos = $entity->getLocation();
+		$pingMs = $this->getNetworkSession()->getPing();
 		if($entity instanceof Living){
-			$pingMs = $this->getNetworkSession()->getPing();
 			if($pingMs !== null && $pingMs > 0){
-				$rewindTicks = (int) min(ceil($pingMs / 50), 4); // cap at 4 ticks (200ms)
+				$rewindTicks = (int) min(ceil($pingMs / 50), 6); // cap at 6 ticks (300ms)
 				$historicalPos = $entity->getPositionHistory()->getPositionAtTick(
 					$this->server->getTick() - $rewindTicks
 				);
@@ -2013,7 +2024,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 				}
 			}
 		}
-		if(!$this->canInteract($reachPos, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION)){
+		if(
+			!$this->canInteract($reachPos, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION) &&
+			!$this->canInteractWithClientHitPosition($entity, $clientClickPos, $clientPlayerPos, (int) ($pingMs ?? 0))
+		){
 			$this->logger->debug("Cancelled attack of entity " . $entity->getId() . " due to not currently being interactable");
 			$ev->cancel();
 		}elseif($this->isSpectator() || ($entity instanceof Player && !$this->server->getConfigGroup()->getConfigBool(ServerProperties::PVP))){
@@ -2072,6 +2086,33 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		}
 
 		return true;
+	}
+
+	private function canInteractWithClientHitPosition(Entity $entity, ?Vector3 $clientClickPos, ?Vector3 $clientPlayerPos, int $pingMs) : bool{
+		if($clientClickPos === null || !$entity instanceof Living){
+			return false;
+		}
+
+		$serverPlayerPos = $this->location;
+		if($clientPlayerPos !== null && $clientPlayerPos->distanceSquared($serverPlayerPos) > 16){
+			return false;
+		}
+
+		$size = $entity->getSize();
+		$entityPos = $entity->getLocation();
+		$relativeClickPos = $entityPos->add($clientClickPos->x, $clientClickPos->y, $clientClickPos->z);
+		$maxAgeTicks = min(max((int) ceil(max($pingMs, 0) / 50), 1) + 2, 8);
+
+		foreach([$clientClickPos, $relativeClickPos] as $candidate){
+			if(!$entity->getPositionHistory()->isNearRecentHitbox($candidate, $size, $this->server->getTick(), $maxAgeTicks, 0.35)){
+				continue;
+			}
+			if($this->canInteract($candidate, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION)){
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -2698,7 +2739,12 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$properties->setGenericFlag(EntityMetadataFlags::HAS_COLLISION, $this->hasBlockCollision());
 
 		$properties->setPlayerFlag(PlayerMetadataFlags::SLEEP, $this->sleeping !== null);
-		$properties->setBlockPos(EntityMetadataProperties::PLAYER_BED_POSITION, $this->sleeping !== null ? BlockPosition::fromVector3($this->sleeping) : new BlockPosition(0, 0, 0));
+		if($this->sleeping !== null){
+			//this should only be sent when the player enters the bed, as of 1.26.??
+			//previously we were setting this to 0,0,0 if the player wasn't sleeping, but that now causes the player to
+			//teleport to that position temporarily when leaving the bed. Bugrock moment...
+			$properties->setBlockPos(EntityMetadataProperties::PLAYER_BED_POSITION, BlockPosition::fromVector3($this->sleeping));
+		}
 
 		if($this->deathPosition !== null && $this->deathPosition->world === $this->location->world){
 			$properties->setBlockPos(EntityMetadataProperties::PLAYER_DEATH_POSITION, BlockPosition::fromVector3($this->deathPosition));
@@ -2925,6 +2971,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	use ChunkListenerNoOpTrait {
 		onChunkChanged as private;
 		onChunkUnloaded as private;
+		onBlockChanged as private;
 	}
 
 	public function onChunkChanged(int $chunkX, int $chunkZ, Chunk $chunk) : void{
@@ -2939,6 +2986,13 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		if($this->isUsingChunk($chunkX, $chunkZ)){
 			$this->logger->debug("Detected forced unload of chunk " . $chunkX . " " . $chunkZ);
 			$this->unloadChunk($chunkX, $chunkZ);
+		}
+	}
+
+	public function onBlockChanged(Vector3 $block) : void{
+		if($this->sleeping !== null && $block->equals($this->sleeping) && !($this->getWorld()->getBlock($block) instanceof Bed)){
+			$this->logger->debug("Bed was changed or deleted, aborting sleep");
+			$this->stopSleep();
 		}
 	}
 }
