@@ -162,12 +162,11 @@ class NetworkSession{
 	private ?int $ping = null;
 
 	/**
-	 * Last client tick reported via PlayerAuthInputPacket, and the server tick at which it was received.
-	 * Foundation for lag-compensated hit registration: keeping the client tick lets a later attacker-side rewind
-	 * key position history precisely. Not used to derive the rewind *amount* (see updateClientTick()).
+	 * Last client tick reported via PlayerAuthInputPacket. Foundation for lag-compensated hit registration: keeping
+	 * the client tick lets a later attacker-side rewind key position history precisely. Not used to derive the
+	 * rewind *amount* (see updateClientTick()).
 	 */
 	private ?int $lastClientTick = null;
-	private ?int $lastClientTickServerTime = null;
 
 	/**
 	 * EMA-smoothed hit-registration rewind, in ticks. Sampling getPing() per attack made the rewind jitter
@@ -385,7 +384,6 @@ class NetworkSession{
 	 */
 	public function updateClientTick(int $clientTick) : void{
 		$this->lastClientTick = $clientTick;
-		$this->lastClientTickServerTime = $this->server->getTick();
 
 		$ping = $this->ping;
 		if($ping === null){
