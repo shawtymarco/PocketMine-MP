@@ -161,6 +161,22 @@ class NetworkSession{
 	protected ?PlayerInfo $info = null;
 	private ?int $ping = null;
 
+	/**
+	 * Last client tick reported via PlayerAuthInputPacket, and the server tick at which it was received.
+	 * Foundation for lag-compensated hit registration: keeping the client tick lets a later attacker-side rewind
+	 * key position history precisely. Not used to derive the rewind *amount* (see updateClientTick()).
+	 */
+	private ?int $lastClientTick = null;
+	private ?int $lastClientTickServerTime = null;
+
+	/**
+	 * EMA-smoothed hit-registration rewind, in ticks. Sampling getPing() per attack made the rewind jitter
+	 * tick-to-tick on unstable connections, so identical swings registered inconsistently. Smoothing here removes
+	 * that jitter while still tracking sustained latency changes.
+	 */
+	private float $smoothedHitRewindTicks = 0.0;
+	private bool $hitRewindInitialised = false;
+
 	private ?PacketHandler $handler = null;
 	/**
 	 * @var PacketHandlerAction[]|null
@@ -353,6 +369,56 @@ class NetworkSession{
 	 */
 	public function updatePing(int $ping) : void{
 		$this->ping = $ping;
+	}
+
+	/**
+	 * Records the client's reported tick from PlayerAuthInputPacket (once per client tick) and folds the current
+	 * latency into a smoothed hit-registration rewind estimate.
+	 *
+	 * IMPORTANT: the rewind amount fundamentally tracks round-trip latency (the client sees other entities ~RTT in
+	 * the past), so it is derived from ping, NOT from the client tick. The client-tick offset is
+	 * (clock-origin + uplink) and is just as jittery as ping, so it cannot replace RTT here. What actually removes
+	 * the per-attack jitter that made hit registration feel random is the smoothing below. The client tick itself
+	 * is retained only as a foundation for a future attacker-side rewind.
+	 *
+	 * @internal Called from InGamePacketHandler::handlePlayerAuthInput().
+	 */
+	public function updateClientTick(int $clientTick) : void{
+		$this->lastClientTick = $clientTick;
+		$this->lastClientTickServerTime = $this->server->getTick();
+
+		$ping = $this->ping;
+		if($ping === null){
+			return;
+		}
+		//rewind ~= RTT in ticks (one tick = 50ms). Interpolation delay is deliberately omitted to stay conservative.
+		$instantRewind = $ping / 50.0;
+		if(!$this->hitRewindInitialised){
+			$this->smoothedHitRewindTicks = $instantRewind;
+			$this->hitRewindInitialised = true;
+		}else{
+			//EMA with alpha=0.15 (~0.3s time constant at 20 TPS): smooths jitter, still tracks real latency within ~1s.
+			$this->smoothedHitRewindTicks = ($this->smoothedHitRewindTicks * 0.85) + ($instantRewind * 0.15);
+		}
+	}
+
+	public function getLastClientTick() : ?int{
+		return $this->lastClientTick;
+	}
+
+	/**
+	 * Returns the smoothed number of ticks to rewind a target's position for lag-compensated hit registration,
+	 * clamped to [0, $maxTicks]. Returns 0 until a latency measurement exists.
+	 */
+	public function getHitRewindTicks(int $maxTicks) : int{
+		if(!$this->hitRewindInitialised){
+			return 0;
+		}
+		$ticks = (int) round($this->smoothedHitRewindTicks);
+		if($ticks < 0){
+			return 0;
+		}
+		return $ticks > $maxTicks ? $maxTicks : $ticks;
 	}
 
 	public function getHandler() : ?PacketHandler{
