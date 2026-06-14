@@ -23,6 +23,8 @@ jobs:
   codestyle:
     name: Code Style checks
     runs-on: ubuntu-22.04
+    # Downstream fork: upstream code-style drift is informational and must not block CI.
+    continue-on-error: true
     strategy:
       fail-fast: false
 

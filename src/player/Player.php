@@ -1590,8 +1590,10 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 *
 	 * @param float $maxDiff defaults to half of the 3D diagonal width of a block
 	 */
-	public function canInteract(Vector3 $pos, float $maxDistance, float $maxDiff = M_SQRT3 / 2) : bool{
-		$eyePos = $this->getEyePos();
+	public function canInteract(Vector3 $pos, float $maxDistance, float $maxDiff = M_SQRT3 / 2, ?Vector3 $eyePos = null) : bool{
+		//$eyePos may be overridden with a lag-compensated (rewound) eye position so that hit registration can compare
+		//the attacker and target at the same point in time. Falls back to the live eye position for all other callers.
+		$eyePos ??= $this->getEyePos();
 		if($eyePos->distanceSquared($pos) > $maxDistance ** 2){
 			return false;
 		}
@@ -2012,20 +2014,36 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 
 		$ev = new EntityDamageByEntityEvent($this, $entity, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $heldItem->getAttackPoints());
 		$reachPos = $entity->getLocation();
+		$attackerEyePos = null;
 		$pingMs = $this->getNetworkSession()->getPing();
 		if($entity instanceof Living){
-			if($pingMs !== null && $pingMs > 0){
-				$rewindTicks = (int) min(ceil($pingMs / 50), 6); // cap at 6 ticks (300ms)
-				$historicalPos = $entity->getPositionHistory()->getPositionAtTick(
-					$this->server->getTick() - $rewindTicks
-				);
+			//Use the EMA-smoothed rewind instead of the raw per-attack ping. Sampling getPing() on every attack made
+			//rewindTicks jump tick-to-tick on jittery connections, so the same swing registered inconsistently
+			//(the worst symptom: hits felt random). The smoothed value still tracks round-trip latency, capped to
+			//6 ticks (300ms) as a sanity bound on how far back in time a hit may reach.
+			$rewindTicks = $this->getNetworkSession()->getHitRewindTicks(6);
+			if($rewindTicks > 0){
+				$serverTick = $this->server->getTick();
+				$historicalPos = $entity->getPositionHistory()->getPositionAtTick($serverTick - $rewindTicks);
 				if($historicalPos !== null){
 					$reachPos = $historicalPos;
+				}
+
+				//Rewind the attacker too. Without this the reach check below compares a rewound target against the
+				//attacker's LIVE (already-moved) eye position, so a player who strafes while clicking misses despite
+				//a valid swing. The attack packet took ~uplink (~half the round-trip) to arrive, so rewinding the
+				//attacker by half the target rewind approximates where they actually were when they swung.
+				$attackerRewind = intdiv($rewindTicks, 2);
+				if($attackerRewind > 0){
+					$attackerHistPos = $this->getPositionHistory()->getPositionAtTick($serverTick - $attackerRewind);
+					if($attackerHistPos !== null){
+						$attackerEyePos = $attackerHistPos->add(0, $this->getEyeHeight(), 0);
+					}
 				}
 			}
 		}
 		if(
-			!$this->canInteract($reachPos, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION) &&
+			!$this->canInteract($reachPos, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION, eyePos: $attackerEyePos) &&
 			!$this->canInteractWithClientHitPosition($entity, $clientClickPos, $clientPlayerPos, (int) ($pingMs ?? 0))
 		){
 			$this->logger->debug("Cancelled attack of entity " . $entity->getId() . " due to not currently being interactable");
