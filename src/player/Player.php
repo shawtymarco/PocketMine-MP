@@ -2034,11 +2034,17 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 				//a valid swing. The attack packet took ~uplink (~half the round-trip) to arrive, so rewinding the
 				//attacker by half the target rewind approximates where they actually were when they swung.
 				$attackerRewind = intdiv($rewindTicks, 2);
-				if($attackerRewind > 0){
-					$attackerHistPos = $this->getPositionHistory()->getPositionAtTick($serverTick - $attackerRewind);
-					if($attackerHistPos !== null){
-						$attackerEyePos = $attackerHistPos->add(0, $this->getEyeHeight(), 0);
-					}
+				$attackerHistPos = $attackerRewind > 0 ? $this->getPositionHistory()->getPositionAtTick($serverTick - $attackerRewind) : null;
+				if($attackerHistPos !== null){
+					$attackerEyePos = $attackerHistPos->add(0, $this->getEyeHeight(), 0);
+				}
+
+				//Launch the victim along the rewound attacker→victim vector the hit was validated against, so the
+				//knockback direction matches what the attacker saw at swing time rather than the live positions read
+				//inside Living::attack() after event dispatch. Only set when the target was actually rewound.
+				if($historicalPos !== null){
+					$attackerKbPos = $attackerHistPos ?? $this->location->asVector3();
+					$ev->setKnockBackDirection(new Vector3($historicalPos->x - $attackerKbPos->x, 0, $historicalPos->z - $attackerKbPos->z));
 				}
 			}
 		}

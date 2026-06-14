@@ -26,12 +26,20 @@ namespace pocketmine\event\entity;
 use pocketmine\entity\effect\VanillaEffects;
 use pocketmine\entity\Entity;
 use pocketmine\entity\Living;
+use pocketmine\math\Vector3;
 
 /**
  * Called when an entity takes damage from another entity.
  */
 class EntityDamageByEntityEvent extends EntityDamageEvent{
 	private int $damagerEntityId;
+
+	/**
+	 * Optional horizontal (x, z) direction override for knockback, as a delta from attacker to victim.
+	 * Set by lag-compensated hit registration so the victim is launched along the vector the attacker
+	 * actually saw at swing time, instead of the live (already-moved) positions read after event dispatch.
+	 */
+	private ?Vector3 $knockBackDirection = null;
 
 	/**
 	 * @param float[] $modifiers
@@ -104,5 +112,22 @@ class EntityDamageByEntityEvent extends EntityDamageEvent{
 	 */
 	public function setVerticalKnockBackLimit(float $verticalKnockBackLimit) : void{
 		$this->verticalKnockBackLimit = $verticalKnockBackLimit;
+	}
+
+	/**
+	 * Returns the horizontal (x, z) direction override used for knockback, or null to use the live
+	 * attacker→victim vector. The y component is ignored.
+	 */
+	public function getKnockBackDirection() : ?Vector3{
+		return $this->knockBackDirection;
+	}
+
+	/**
+	 * Overrides the horizontal direction used for knockback, as an attacker→victim (x, z) delta.
+	 * Used by lag-compensated hit registration so knockback matches the rewound positions the hit was
+	 * validated against. Pass null to fall back to the live positions at damage-apply time.
+	 */
+	public function setKnockBackDirection(?Vector3 $direction) : void{
+		$this->knockBackDirection = $direction;
 	}
 }

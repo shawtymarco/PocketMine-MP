@@ -117,6 +117,19 @@ abstract class Living extends Entity{
 		return $this->positionHistory;
 	}
 
+	/**
+	 * Drops stale position history after a teleport (respawn, /tp, world switch). Without this, the
+	 * lag-compensated hit registration in Player::attackEntity() could rewind a hit onto where this
+	 * entity stood up to ~2s ago, producing phantom hits or phantom misses right after every teleport.
+	 */
+	public function teleport(Vector3 $pos, ?float $yaw = null, ?float $pitch = null) : bool{
+		$teleported = parent::teleport($pos, $yaw, $pitch);
+		if($teleported){
+			$this->positionHistory->clear();
+		}
+		return $teleported;
+	}
+
 	public int $deadTicks = 0;
 	protected int $maxDeadTicks = 25;
 
@@ -600,8 +613,16 @@ abstract class Living extends Entity{
 			}elseif($source instanceof EntityDamageByEntityEvent){
 				$e = $source->getDamager();
 				if($e !== null){
-					$deltaX = $this->location->x - $e->location->x;
-					$deltaZ = $this->location->z - $e->location->z;
+					//Prefer the rewound attacker→victim direction set by lag-compensated hit registration, so the
+					//victim is launched along the vector the attacker saw at swing time. Fall back to live positions.
+					$kbDir = $source->getKnockBackDirection();
+					if($kbDir !== null){
+						$deltaX = $kbDir->x;
+						$deltaZ = $kbDir->z;
+					}else{
+						$deltaX = $this->location->x - $e->location->x;
+						$deltaZ = $this->location->z - $e->location->z;
+					}
 					$this->knockBack($deltaX, $deltaZ, $source->getKnockBack(), $source->getVerticalKnockBackLimit());
 				}
 			}
