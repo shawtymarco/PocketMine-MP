@@ -51,6 +51,7 @@ use pocketmine\network\mcpe\protocol\InventoryContentPacket;
 use pocketmine\network\mcpe\protocol\InventorySlotPacket;
 use pocketmine\network\mcpe\protocol\MobEquipmentPacket;
 use pocketmine\network\mcpe\protocol\PlayerEnchantOptionsPacket;
+use pocketmine\network\mcpe\protocol\ProtocolInfo;
 use pocketmine\network\mcpe\protocol\types\BlockPosition;
 use pocketmine\network\mcpe\protocol\types\Enchant;
 use pocketmine\network\mcpe\protocol\types\EnchantOption as ProtocolEnchantOption;
@@ -261,6 +262,9 @@ class InventoryManager{
 		foreach($networkInventoryActions as $action){
 			if($action->sourceType !== NetworkInventoryAction::SOURCE_CONTAINER){
 				continue;
+			}
+			if($action->windowId === null){
+				throw new PacketHandlingException("Window ID should always be set for SOURCE_CONTAINER");
 			}
 
 			//legacy transactions should not modify or predict anything other than these inventories, since these are
@@ -521,7 +525,7 @@ class InventoryManager{
 			$this->session->sendDataPacket(InventorySlotPacket::create(
 				$windowId,
 				$netSlot,
-				new FullContainerName($this->lastInventoryNetworkId),
+				$this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_26_20 ? null : new FullContainerName($this->lastInventoryNetworkId),
 				0,
 				null,
 				new ItemStackWrapper(0, ItemStack::null())
@@ -531,7 +535,7 @@ class InventoryManager{
 		$this->session->sendDataPacket(InventorySlotPacket::create(
 			$windowId,
 			$netSlot,
-			new FullContainerName($this->lastInventoryNetworkId),
+			$this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_26_20 ? null : new FullContainerName($this->lastInventoryNetworkId),
 			0,
 			null,
 			$itemStackWrapper
@@ -553,12 +557,12 @@ class InventoryManager{
 		$this->session->sendDataPacket(InventoryContentPacket::create(
 			$windowId,
 			array_fill_keys(array_keys($itemStackWrappers), new ItemStackWrapper(0, ItemStack::null())),
-			new FullContainerName($this->lastInventoryNetworkId),
+			new FullContainerName($this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_26_20 ? 0 : $this->lastInventoryNetworkId, null),
 			0,
 			new ItemStackWrapper(0, ItemStack::null())
 		));
 		//now send the real contents
-		$this->session->sendDataPacket(InventoryContentPacket::create($windowId, $itemStackWrappers, new FullContainerName($this->lastInventoryNetworkId), 0, new ItemStackWrapper(0, ItemStack::null())));
+		$this->session->sendDataPacket(InventoryContentPacket::create($windowId, $itemStackWrappers, new FullContainerName($this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_26_20 ? 0 : $this->lastInventoryNetworkId, null), 0, new ItemStackWrapper(0, ItemStack::null())));
 	}
 
 	public function syncSlot(Inventory $inventory, int $slot, ItemStack $itemStack) : void{
