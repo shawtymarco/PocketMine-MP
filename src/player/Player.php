@@ -2016,7 +2016,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$reachPos = $entity->getLocation();
 		$attackerEyePos = null;
 		$pingMs = $this->getNetworkSession()->getPing();
-		if($entity instanceof Living){
+		if($entity instanceof Living && \pocketmine\entity\PositionHistory::lagCompEnabled()){
 			//Use the EMA-smoothed rewind instead of the raw per-attack ping. Sampling getPing() on every attack made
 			//rewindTicks jump tick-to-tick on jittery connections, so the same swing registered inconsistently
 			//(the worst symptom: hits felt random). The smoothed value still tracks round-trip latency, capped to

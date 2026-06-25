@@ -702,11 +702,15 @@ abstract class Living extends Entity{
 
 		$hasUpdate = parent::entityBaseTick($tickDiff);
 
-		// Record position for lag-compensated hit registration
-		$this->positionHistory->record(
-			$this->getWorld()->getServer()->getTick(),
-			$this->location->asVector3()
-		);
+		// Record position for lag-compensated hit registration. Gated so that when
+		// lag-comp is disabled via ELIAGIC_HIT_LAGCOMP the per-tick recording cost is
+		// skipped entirely for every living entity.
+		if(PositionHistory::lagCompEnabled()){
+			$this->positionHistory->record(
+				$this->getWorld()->getServer()->getTick(),
+				$this->location->asVector3()
+			);
+		}
 
 		if($this->isAlive()){
 			if($this->effectManager->tick($tickDiff)){

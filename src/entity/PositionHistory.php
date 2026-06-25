@@ -14,8 +14,31 @@ final class PositionHistory{
 
 	private const MAX_TICKS = 40; // 2 seconds at 20 TPS
 
+	/** Cached result of the ELIAGIC_HIT_LAGCOMP env lookup (null = not yet resolved). */
+	private static ?bool $lagCompEnabled = null;
+
 	/** @var array<int, Vector3> tick => position */
 	private array $history = [];
+
+	/**
+	 * Whether lag-compensated hit registration is active.
+	 *
+	 * Controlled by the ELIAGIC_HIT_LAGCOMP environment variable (k8s-style per-container
+	 * injection, mirroring BEDWARS_SERVER_ID) so a single replica can be flipped to A/B test
+	 * whether hits feel better with rewind on or off. Defaults to ON — only an explicit
+	 * "0"/"false"/"off" disables it. Read once and cached because this is queried on the
+	 * per-tick entity hot path, where a getenv() every tick would be wasteful.
+	 *
+	 * When disabled, Living skips per-tick position recording and Player skips the attack
+	 * rewind, so hits resolve against live positions (vanilla behaviour).
+	 */
+	public static function lagCompEnabled() : bool{
+		if(self::$lagCompEnabled === null){
+			$env = strtolower((string) getenv("ELIAGIC_HIT_LAGCOMP"));
+			self::$lagCompEnabled = !($env === "0" || $env === "false" || $env === "off");
+		}
+		return self::$lagCompEnabled;
+	}
 
 	/** Records the entity's current position for the given tick. */
 	public function record(int $tick, Vector3 $pos) : void{
