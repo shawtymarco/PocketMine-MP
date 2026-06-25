@@ -40,6 +40,17 @@ final class PositionHistory{
 		return self::$lagCompEnabled;
 	}
 
+	/**
+	 * Runtime override for {@link lagCompEnabled()}, used by the Discord /admin hitreg
+	 * toggle. The API delivers the per-server desired state on every BedWars heartbeat,
+	 * so a toggle takes effect within one tick and survives a server restart (the env var
+	 * sets the boot default, then the first tick re-applies the API's stored value). Once
+	 * set, this supersedes the ELIAGIC_HIT_LAGCOMP default for the rest of the process.
+	 */
+	public static function setLagCompEnabled(bool $enabled) : void{
+		self::$lagCompEnabled = $enabled;
+	}
+
 	/** Records the entity's current position for the given tick. */
 	public function record(int $tick, Vector3 $pos) : void{
 		$this->history[$tick] = $pos;
