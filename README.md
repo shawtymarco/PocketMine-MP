@@ -6,43 +6,6 @@ Maintained by [@shawtymarco](https://github.com/shawtymarco). Compiled into `Poc
 
 ## Patches
 
-### Lag-Compensated Hit Registration
-
-[`f472f22`](https://github.com/shawtymarco/PocketMine-MP/commit/f472f22)
-
-Adds a `PositionHistory` ring buffer to all `Living` entities. `Player::attackEntity()` rewinds the target's position by the attacker's ping for reach validation, reducing ghost hits under latency.
-
-**New file: `src/entity/PositionHistory.php`**
-
-Ring buffer storing entity positions indexed by server tick. Keeps up to 20 ticks (1 second). `getPositionAtTick()` returns the closest recorded position to the requested tick.
-
-```php
-final class PositionHistory{
-    private const MAX_TICKS = 20;
-    /** @var array<int, Vector3> tick => position */
-    private array $history = [];
-    public function record(int $tick, Vector3 $pos) : void;
-    public function getPositionAtTick(int $tick) : ?Vector3;
-}
-```
-
-**`src/entity/Living.php`**
-
-New `PositionHistory $positionHistory` property initialized in `initEntity()`, exposed via `getPositionHistory()`.
-
-**`src/player/Player.php` — `attackEntity()`**
-
-Calculates rewind ticks from the attacker's ping (capped at 4 ticks / 200 ms), fetches the target's historical position, and uses that for reach validation instead of the current position:
-
-```php
-$rewindTicks = (int) min(ceil($pingMs / 50), 4);
-$historicalPos = $entity->getPositionHistory()->getPositionAtTick(
-    $this->server->getTick() - $rewindTicks
-);
-```
-
----
-
 ### Bow Charging Robustness
 
 A series of fixes making bow charging reliable under high-ping conditions, matching Java Edition behavior.

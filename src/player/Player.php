@@ -1590,10 +1590,8 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 *
 	 * @param float $maxDiff defaults to half of the 3D diagonal width of a block
 	 */
-	public function canInteract(Vector3 $pos, float $maxDistance, float $maxDiff = M_SQRT3 / 2, ?Vector3 $eyePos = null) : bool{
-		//$eyePos may be overridden with a lag-compensated (rewound) eye position so that hit registration can compare
-		//the attacker and target at the same point in time. Falls back to the live eye position for all other callers.
-		$eyePos ??= $this->getEyePos();
+	public function canInteract(Vector3 $pos, float $maxDistance, float $maxDiff = M_SQRT3 / 2) : bool{
+		$eyePos = $this->getEyePos();
 		if($eyePos->distanceSquared($pos) > $maxDistance ** 2){
 			return false;
 		}
@@ -2000,7 +1998,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	 *
 	 * @return bool if the entity was dealt damage
 	 */
-	public function attackEntity(Entity $entity, ?Vector3 $clientClickPos = null, ?Vector3 $clientPlayerPos = null) : bool{
+	public function attackEntity(Entity $entity) : bool{
 		if(!$entity->isAlive()){
 			return false;
 		}
@@ -2013,45 +2011,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$oldItem = clone $heldItem;
 
 		$ev = new EntityDamageByEntityEvent($this, $entity, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $heldItem->getAttackPoints());
-		$reachPos = $entity->getLocation();
-		$attackerEyePos = null;
-		$pingMs = $this->getNetworkSession()->getPing();
-		if($entity instanceof Living && \pocketmine\entity\PositionHistory::lagCompEnabled()){
-			//Use the EMA-smoothed rewind instead of the raw per-attack ping. Sampling getPing() on every attack made
-			//rewindTicks jump tick-to-tick on jittery connections, so the same swing registered inconsistently
-			//(the worst symptom: hits felt random). The smoothed value still tracks round-trip latency, capped to
-			//6 ticks (300ms) as a sanity bound on how far back in time a hit may reach.
-			$rewindTicks = $this->getNetworkSession()->getHitRewindTicks(6);
-			if($rewindTicks > 0){
-				$serverTick = $this->server->getTick();
-				$historicalPos = $entity->getPositionHistory()->getPositionAtTick($serverTick - $rewindTicks);
-				if($historicalPos !== null){
-					$reachPos = $historicalPos;
-				}
-
-				//Rewind the attacker too. Without this the reach check below compares a rewound target against the
-				//attacker's LIVE (already-moved) eye position, so a player who strafes while clicking misses despite
-				//a valid swing. The attack packet took ~uplink (~half the round-trip) to arrive, so rewinding the
-				//attacker by half the target rewind approximates where they actually were when they swung.
-				$attackerRewind = intdiv($rewindTicks, 2);
-				$attackerHistPos = $attackerRewind > 0 ? $this->getPositionHistory()->getPositionAtTick($serverTick - $attackerRewind) : null;
-				if($attackerHistPos !== null){
-					$attackerEyePos = $attackerHistPos->add(0, $this->getEyeHeight(), 0);
-				}
-
-				//Launch the victim along the rewound attacker→victim vector the hit was validated against, so the
-				//knockback direction matches what the attacker saw at swing time rather than the live positions read
-				//inside Living::attack() after event dispatch. Only set when the target was actually rewound.
-				if($historicalPos !== null){
-					$attackerKbPos = $attackerHistPos ?? $this->location->asVector3();
-					$ev->setKnockBackDirection(new Vector3($historicalPos->x - $attackerKbPos->x, 0, $historicalPos->z - $attackerKbPos->z));
-				}
-			}
-		}
-		if(
-			!$this->canInteract($reachPos, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION, eyePos: $attackerEyePos) &&
-			!$this->canInteractWithClientHitPosition($entity, $clientClickPos, $clientPlayerPos, (int) ($pingMs ?? 0))
-		){
+		if(!$this->canInteract($entity->getLocation(), self::MAX_REACH_DISTANCE_ENTITY_INTERACTION)){
 			$this->logger->debug("Cancelled attack of entity " . $entity->getId() . " due to not currently being interactable");
 			$ev->cancel();
 		}elseif($this->isSpectator() || ($entity instanceof Player && !$this->server->getConfigGroup()->getConfigBool(ServerProperties::PVP))){
@@ -2110,33 +2070,6 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		}
 
 		return true;
-	}
-
-	private function canInteractWithClientHitPosition(Entity $entity, ?Vector3 $clientClickPos, ?Vector3 $clientPlayerPos, int $pingMs) : bool{
-		if($clientClickPos === null || !$entity instanceof Living){
-			return false;
-		}
-
-		$serverPlayerPos = $this->location;
-		if($clientPlayerPos !== null && $clientPlayerPos->distanceSquared($serverPlayerPos) > 16){
-			return false;
-		}
-
-		$size = $entity->getSize();
-		$entityPos = $entity->getLocation();
-		$relativeClickPos = $entityPos->add($clientClickPos->x, $clientClickPos->y, $clientClickPos->z);
-		$maxAgeTicks = min(max((int) ceil(max($pingMs, 0) / 50), 1) + 2, 8);
-
-		foreach([$clientClickPos, $relativeClickPos] as $candidate){
-			if(!$entity->getPositionHistory()->isNearRecentHitbox($candidate, $size, $this->server->getTick(), $maxAgeTicks, 0.35)){
-				continue;
-			}
-			if($this->canInteract($candidate, self::MAX_REACH_DISTANCE_ENTITY_INTERACTION)){
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	/**

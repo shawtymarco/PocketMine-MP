@@ -195,10 +195,6 @@ class InGamePacketHandler extends PacketHandler{
 			}
 		}
 
-		//Feed the client's reported tick into the session so hit registration can smooth its lag-compensation rewind
-		//(removes per-attack ping jitter) and so a future attacker-side rewind has the client clock available.
-		$this->session->updateClientTick($packet->getTick());
-
 		if($rawYaw !== $this->lastPlayerAuthInputYaw || $rawPitch !== $this->lastPlayerAuthInputPitch){
 			$this->lastPlayerAuthInputYaw = $rawYaw;
 			$this->lastPlayerAuthInputPitch = $rawPitch;
@@ -649,7 +645,7 @@ class InGamePacketHandler extends PacketHandler{
 				$this->player->interactEntity($target, $data->getClickPosition());
 				return true;
 			case UseItemOnEntityTransactionData::ACTION_ATTACK:
-				$this->player->attackEntity($target, $data->getClickPosition(), $data->getPlayerPosition());
+				$this->player->attackEntity($target);
 				return true;
 		}
 
