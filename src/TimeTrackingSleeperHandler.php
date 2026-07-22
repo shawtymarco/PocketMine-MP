@@ -61,7 +61,7 @@ final class TimeTrackingSleeperHandler extends SleeperHandler{
 				$handler();
 			}finally{
 				$timings->stopTiming();
-				TickProfiler::recordInterruptContributor($name, $profileStartedAt);
+				TickProfiler::recordInterruptContributor("handler", $name, $profileStartedAt);
 			}
 		});
 	}

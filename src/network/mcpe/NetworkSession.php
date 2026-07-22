@@ -414,11 +414,17 @@ class NetworkSession{
 			return;
 		}
 
+		$profileStartedAt = TickProfiler::startTimer();
+		$profileSession = $profileStartedAt !== 0 ? $this->getDisplayName() : "";
+		$wireBytes = strlen($payload);
+		$decompressedBytes = 0;
+		$count = 0;
 		Timings::$playerNetworkReceive->startTiming();
 		try{
 			$this->packetBatchLimiter->decrement();
 
 			if($this->cipher !== null){
+				$decryptStartedAt = TickProfiler::startTimer();
 				Timings::$playerNetworkReceiveDecrypt->startTiming();
 				try{
 					$payload = $this->cipher->decrypt($payload);
@@ -427,6 +433,7 @@ class NetworkSession{
 					throw PacketHandlingException::wrap($e, "Packet decryption error");
 				}finally{
 					Timings::$playerNetworkReceiveDecrypt->stopTiming();
+					TickProfiler::recordContributor("network_decrypt", $profileSession, $decryptStartedAt);
 				}
 			}
 
@@ -441,6 +448,7 @@ class NetworkSession{
 					if($compressionType === CompressionAlgorithm::NONE){
 						$decompressed = $compressed;
 					}elseif($compressionType === $this->compressor->getNetworkId()){
+						$decompressStartedAt = TickProfiler::startTimer();
 						try{
 							Timings::$playerNetworkReceiveDecompress->startTiming();
 							$decompressed = $this->compressor->decompress($compressed);
@@ -449,11 +457,13 @@ class NetworkSession{
 							throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
 						}finally{
 							Timings::$playerNetworkReceiveDecompress->stopTiming();
+							TickProfiler::recordContributor("network_decompress", $profileSession, $decompressStartedAt);
 						}
 					}else{
 						throw new PacketHandlingException("Packet compressed with unexpected compression type $compressionType");
 					}
 				}else{
+					$decompressStartedAt = TickProfiler::startTimer();
 					try{
 						Timings::$playerNetworkReceiveDecompress->startTiming();
 						$decompressed = $this->compressor->decompress($payload);
@@ -462,13 +472,14 @@ class NetworkSession{
 						throw PacketHandlingException::wrap($e, "Compressed packet batch decode error");
 					}finally{
 						Timings::$playerNetworkReceiveDecompress->stopTiming();
+						TickProfiler::recordContributor("network_decompress", $profileSession, $decompressStartedAt);
 					}
 				}
 			}else{
 				$decompressed = $payload;
 			}
 
-			$count = 0;
+			$decompressedBytes = strlen($decompressed);
 			try{
 				$stream = new ByteBufferReader($decompressed);
 				foreach(PacketBatch::decodeRaw($stream) as $buffer){
@@ -509,6 +520,13 @@ class NetworkSession{
 			}
 		}finally{
 			Timings::$playerNetworkReceive->stopTiming();
+			if($profileStartedAt !== 0){
+				TickProfiler::recordContributor(
+					"network_batch",
+					$profileSession . ":wire=" . $wireBytes . ":decoded=" . $decompressedBytes . ":packets=" . $count,
+					$profileStartedAt
+				);
+			}
 		}
 	}
 

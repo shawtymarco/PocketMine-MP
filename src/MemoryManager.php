@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\event\server\LowMemoryEvent;
 use pocketmine\network\mcpe\cache\ChunkCache;
 use pocketmine\scheduler\DumpWorkerMemoryTask;
@@ -32,6 +33,8 @@ use pocketmine\utils\Process;
 use pocketmine\YmlServerProperties as Yml;
 use function gc_collect_cycles;
 use function gc_mem_caches;
+use function gc_status;
+use function hrtime;
 use function ini_set;
 use function intdiv;
 use function mb_strtoupper;
@@ -71,7 +74,7 @@ class MemoryManager{
 		private Server $server
 	){
 		$this->logger = new \PrefixedLogger($server->getLogger(), "Memory Manager");
-		$this->cycleGcManager = new GarbageCollectorManager($this->logger, Timings::$memoryManager);
+		$this->cycleGcManager = new GarbageCollectorManager(Timings::$memoryManager);
 
 		$this->init($server->getConfigGroup());
 	}
@@ -155,7 +158,7 @@ class MemoryManager{
 		$ev = new LowMemoryEvent($memory, $limit, $global, $triggerCount);
 		$ev->call();
 
-		$cycles = $this->triggerGarbageCollector();
+		$cycles = $this->triggerGarbageCollector("low_memory");
 
 		$this->logger->debug(sprintf("Freed %gMB, $cycles cycles", round(($ev->getMemoryFreed() / 1024) / 1024, 2)));
 	}
@@ -194,7 +197,7 @@ class MemoryManager{
 
 		if($this->garbageCollectionPeriod > 0 && ++$this->garbageCollectionTicker >= $this->garbageCollectionPeriod){
 			$this->garbageCollectionTicker = 0;
-			$this->triggerGarbageCollector();
+			$this->triggerGarbageCollector("periodic");
 		}else{
 			$this->cycleGcManager->maybeCollectCycles();
 		}
@@ -202,8 +205,11 @@ class MemoryManager{
 		Timings::$memoryManager->stopTiming();
 	}
 
-	public function triggerGarbageCollector() : int{
+	public function triggerGarbageCollector(string $source = "manual") : int{
 		Timings::$garbageCollector->startTiming();
+		$startedAt = hrtime(true);
+		$rootsBefore = gc_status()["roots"];
+		$threshold = $this->cycleGcManager->getThreshold();
 
 		$pool = $this->server->getAsyncPool();
 		if(($w = $pool->shutdownUnusedWorkers()) > 0){
@@ -215,6 +221,16 @@ class MemoryManager{
 
 		$cycles = gc_collect_cycles();
 		gc_mem_caches();
+		$rootsAfter = gc_status()["roots"];
+		TickProfiler::recordGarbageCollection(
+			$source,
+			$rootsBefore,
+			$rootsAfter,
+			$threshold,
+			$threshold,
+			$cycles,
+			hrtime(true) - $startedAt
+		);
 
 		Timings::$garbageCollector->stopTiming();
 

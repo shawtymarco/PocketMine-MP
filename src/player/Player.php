@@ -32,6 +32,7 @@ use pocketmine\block\VanillaBlocks;
 use pocketmine\command\CommandSender;
 use pocketmine\crafting\CraftingGrid;
 use pocketmine\data\java\GameModeIdMap;
+use pocketmine\debug\TickProfiler;
 use pocketmine\entity\animation\Animation;
 use pocketmine\entity\animation\ArmSwingAnimation;
 use pocketmine\entity\animation\ConsumingItemAnimation;
@@ -1004,6 +1005,8 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			return;
 		}
 
+		$profileStartedAt = TickProfiler::startTimer();
+		$usedChunkCountBefore = $profileStartedAt !== 0 ? count($this->usedChunks) : 0;
 		Timings::$playerChunkOrder->startTiming();
 
 		$newOrder = [];
@@ -1011,13 +1014,13 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$unloadChunks = $this->usedChunks;
 
 		$world = $this->getWorld();
+		$worldFolder = $world->getFolderName();
 		$tickingChunkRadius = $world->getChunkTickRadius();
 
 		/** [BETTERPMMP-PATCH] Per-world view distance override */
 		$effectiveViewDistance = $this->server->getAllowedViewDistance($this->viewDistance);
 		$perWorldViewDistance = $this->server->getConfigGroup()->getProperty('better-pmmp.per-world-view-distance', []);
 		if(is_array($perWorldViewDistance)){
-			$worldFolder = $world->getFolderName();
 			if(isset($perWorldViewDistance[$worldFolder])){
 				$effectiveViewDistance = min($effectiveViewDistance, max(1, (int) $perWorldViewDistance[$worldFolder]));
 			}
@@ -1050,11 +1053,25 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$this->updateTickingChunkRegistrations($this->tickingChunks, $tickingChunks);
 		$this->tickingChunks = $tickingChunks;
 
-		if(count($this->loadQueue) > 0 || count($unloadChunks) > 0){
+		$loadCount = count($this->loadQueue);
+		$unloadCount = count($unloadChunks);
+		if($loadCount > 0 || $unloadCount > 0){
 			$this->getNetworkSession()->syncViewAreaCenterPoint($this->location, $effectiveViewDistance);
 		}
 
 		Timings::$playerChunkOrder->stopTiming();
+		if($profileStartedAt !== 0){
+			TickProfiler::recordContributor(
+				"chunk_order",
+				$this->getName() . "@" . $worldFolder .
+					":center=" . ($this->location->getFloorX() >> Chunk::COORD_BIT_SIZE) . "," . ($this->location->getFloorZ() >> Chunk::COORD_BIT_SIZE) .
+					":view=" . $effectiveViewDistance .
+					":used=" . $usedChunkCountBefore . ">" . count($this->usedChunks) .
+					":load=" . $loadCount .
+					":unload=" . $unloadCount,
+				$profileStartedAt
+			);
+		}
 	}
 
 	/**

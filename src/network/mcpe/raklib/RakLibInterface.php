@@ -24,6 +24,7 @@ declare(strict_types=1);
 namespace pocketmine\network\mcpe\raklib;
 
 use pmmp\thread\ThreadSafeArray;
+use pocketmine\debug\TickProfiler;
 use pocketmine\lang\KnownTranslationFactory;
 use pocketmine\network\AdvancedNetworkInterface;
 use pocketmine\network\mcpe\compression\ZlibCompressor;
@@ -55,6 +56,7 @@ use function base64_encode;
 use function implode;
 use function mt_rand;
 use function rtrim;
+use function strlen;
 use function substr;
 use const PHP_INT_MAX;
 
@@ -104,7 +106,15 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 		$sleeperEntry = $this->server->getTickSleeper()->addNotifier(function() : void{
 			Timings::$connection->startTiming();
 			try{
-				while($this->eventReceiver->handle($this));
+				do{
+					$profileStartedAt = TickProfiler::startTimer();
+					$handled = false;
+					try{
+						$handled = $this->eventReceiver->handle($this);
+					}finally{
+						TickProfiler::recordContributor("raklib_dispatch", $handled ? "message" : "drain", $profileStartedAt);
+					}
+				}while($handled);
 			}finally{
 				Timings::$connection->stopTiming();
 			}
@@ -159,15 +169,20 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onClientDisconnect(int $sessionId, int $reason) : void{
-		if(isset($this->sessions[$sessionId])){
-			$session = $this->sessions[$sessionId];
-			unset($this->sessions[$sessionId]);
-			$session->onClientDisconnect(match($reason){
-				DisconnectReason::CLIENT_DISCONNECT => KnownTranslationFactory::pocketmine_disconnect_clientDisconnect(),
-				DisconnectReason::PEER_TIMEOUT => KnownTranslationFactory::pocketmine_disconnect_error_timeout(),
-				DisconnectReason::CLIENT_RECONNECT => KnownTranslationFactory::pocketmine_disconnect_clientReconnect(),
-				default => "Unknown RakLib disconnect reason (ID $reason)"
-			});
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			if(isset($this->sessions[$sessionId])){
+				$session = $this->sessions[$sessionId];
+				unset($this->sessions[$sessionId]);
+				$session->onClientDisconnect(match($reason){
+					DisconnectReason::CLIENT_DISCONNECT => KnownTranslationFactory::pocketmine_disconnect_clientDisconnect(),
+					DisconnectReason::PEER_TIMEOUT => KnownTranslationFactory::pocketmine_disconnect_error_timeout(),
+					DisconnectReason::CLIENT_RECONNECT => KnownTranslationFactory::pocketmine_disconnect_clientReconnect(),
+					default => "Unknown RakLib disconnect reason (ID $reason)"
+				});
+			}
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", "client_disconnect", $profileStartedAt);
 		}
 	}
 
@@ -184,50 +199,64 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onClientConnect(int $sessionId, string $address, int $port, int $clientID) : void{
-		$session = new NetworkSession(
-			$this->server,
-			$this->network->getSessionManager(),
-			PacketPool::getInstance(),
-			new RakLibPacketSender($sessionId, $this),
-			$this->packetBroadcaster,
-			$this->entityEventBroadcaster,
-			ZlibCompressor::getInstance(), //TODO: this shouldn't be hardcoded, but we might need the RakNet protocol version to select it
-			$this->typeConverter,
-			$address,
-			$port
-		);
-		$this->sessions[$sessionId] = $session;
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			$session = new NetworkSession(
+				$this->server,
+				$this->network->getSessionManager(),
+				PacketPool::getInstance(),
+				new RakLibPacketSender($sessionId, $this),
+				$this->packetBroadcaster,
+				$this->entityEventBroadcaster,
+				ZlibCompressor::getInstance(), //TODO: this shouldn't be hardcoded, but we might need the RakNet protocol version to select it
+				$this->typeConverter,
+				$address,
+				$port
+			);
+			$this->sessions[$sessionId] = $session;
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", "client_connect", $profileStartedAt);
+		}
 	}
 
 	public function onPacketReceive(int $sessionId, string $packet) : void{
-		if(isset($this->sessions[$sessionId])){
-			if($packet === "" || $packet[0] !== self::MCPE_RAKNET_PACKET_ID){
-				$this->sessions[$sessionId]->getLogger()->debug("Non-FE packet received: " . base64_encode($packet));
-				return;
-			}
-			//get this now for blocking in case the player was closed before the exception was raised
-			$session = $this->sessions[$sessionId];
-			$address = $session->getIp();
-			$buf = substr($packet, 1);
-			$name = $session->getDisplayName();
-			try{
-				$session->handleEncoded($buf);
-			}catch(PacketHandlingException $e){
-				$logger = $session->getLogger();
+		$profileStartedAt = TickProfiler::startTimer();
+		$profileName = "packet_receive";
+		try{
+			if(isset($this->sessions[$sessionId])){
+				if($profileStartedAt !== 0){
+					$profileName .= ":" . $this->sessions[$sessionId]->getDisplayName() . ":bytes=" . strlen($packet);
+				}
+				if($packet === "" || $packet[0] !== self::MCPE_RAKNET_PACKET_ID){
+					$this->sessions[$sessionId]->getLogger()->debug("Non-FE packet received: " . base64_encode($packet));
+					return;
+				}
+				//get this now for blocking in case the player was closed before the exception was raised
+				$session = $this->sessions[$sessionId];
+				$address = $session->getIp();
+				$buf = substr($packet, 1);
+				$name = $session->getDisplayName();
+				try{
+					$session->handleEncoded($buf);
+				}catch(PacketHandlingException $e){
+					$logger = $session->getLogger();
 
-				$session->disconnectWithError(
-					reason: "Bad packet: " . $e->getMessage(),
-					disconnectScreenMessage: KnownTranslationFactory::pocketmine_disconnect_error_badPacket()
-				);
-				//intentionally doesn't use logException, we don't want spammy packet error traces to appear in release mode
-				$logger->debug(implode("\n", Utils::printableExceptionInfo($e)));
+					$session->disconnectWithError(
+						reason: "Bad packet: " . $e->getMessage(),
+						disconnectScreenMessage: KnownTranslationFactory::pocketmine_disconnect_error_badPacket()
+					);
+					//intentionally doesn't use logException, we don't want spammy packet error traces to appear in release mode
+					$logger->debug(implode("\n", Utils::printableExceptionInfo($e)));
 
-				$this->interface->blockAddress($address, 5);
-			}catch(\Throwable $e){
-				//record the name of the player who caused the crash, to make it easier to find the reproducing steps
-				$this->server->getLogger()->emergency("Crash occurred while handling a packet from session: $name");
-				throw $e;
+					$this->interface->blockAddress($address, 5);
+				}catch(\Throwable $e){
+					//record the name of the player who caused the crash, to make it easier to find the reproducing steps
+					$this->server->getLogger()->emergency("Crash occurred while handling a packet from session: $name");
+					throw $e;
+				}
 			}
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", $profileName, $profileStartedAt);
 		}
 	}
 
@@ -240,7 +269,12 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onRawPacketReceive(string $address, int $port, string $payload) : void{
-		$this->network->processRawPacket($this, $address, $port, $payload);
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			$this->network->processRawPacket($this, $address, $port, $payload);
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", "raw_packet_receive:bytes=" . strlen($payload), $profileStartedAt);
+		}
 	}
 
 	public function sendRawPacket(string $address, int $port, string $payload) : void{
@@ -252,8 +286,13 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onPacketAck(int $sessionId, int $identifierACK) : void{
-		if(isset($this->sessions[$sessionId])){
-			$this->sessions[$sessionId]->handleAckReceipt($identifierACK);
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			if(isset($this->sessions[$sessionId])){
+				$this->sessions[$sessionId]->handleAckReceipt($identifierACK);
+			}
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", "packet_ack", $profileStartedAt);
 		}
 	}
 
@@ -288,7 +327,12 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onBandwidthStatsUpdate(int $bytesSentDiff, int $bytesReceivedDiff) : void{
-		$this->network->getBandwidthTracker()->add($bytesSentDiff, $bytesReceivedDiff);
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			$this->network->getBandwidthTracker()->add($bytesSentDiff, $bytesReceivedDiff);
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", "bandwidth_stats", $profileStartedAt);
+		}
 	}
 
 	public function putPacket(int $sessionId, string $payload, bool $immediate = true, ?int $receiptId = null) : void{
@@ -304,8 +348,13 @@ class RakLibInterface implements ServerEventListener, AdvancedNetworkInterface{
 	}
 
 	public function onPingMeasure(int $sessionId, int $pingMS) : void{
-		if(isset($this->sessions[$sessionId])){
-			$this->sessions[$sessionId]->updatePing($pingMS);
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			if(isset($this->sessions[$sessionId])){
+				$this->sessions[$sessionId]->updatePing($pingMS);
+			}
+		}finally{
+			TickProfiler::recordContributor("raklib_callback", "ping_measure", $profileStartedAt);
 		}
 	}
 }

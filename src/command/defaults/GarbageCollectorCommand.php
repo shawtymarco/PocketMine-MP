@@ -57,7 +57,7 @@ class GarbageCollectorCommand extends VanillaCommand{
 			$world->clearCache(true);
 		}
 
-		$cyclesCollected = $sender->getServer()->getMemoryManager()->triggerGarbageCollector();
+		$cyclesCollected = $sender->getServer()->getMemoryManager()->triggerGarbageCollector("command");
 
 		$sender->sendMessage(KnownTranslationFactory::pocketmine_command_gc_header()->format(TextFormat::GREEN . "---- " . TextFormat::RESET, TextFormat::GREEN . " ----" . TextFormat::RESET));
 		$sender->sendMessage(KnownTranslationFactory::pocketmine_command_gc_chunks(TextFormat::RED . number_format($chunksCollected))->prefix(TextFormat::GOLD));

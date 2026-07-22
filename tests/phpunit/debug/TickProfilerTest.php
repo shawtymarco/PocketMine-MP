@@ -33,7 +33,10 @@ final class TickProfilerTest extends TestCase{
 	public function testCarriesSleeperHandlersIntoNextTick() : void{
 		TickProfiler::enable();
 		$interruptStartedAt = TickProfiler::startInterruptTimer();
-		TickProfiler::recordInterruptContributor("AsyncPool", $interruptStartedAt);
+		$packetStartedAt = TickProfiler::startTimer();
+		TickProfiler::recordContributor("packet_receive", "MovePlayerPacket", $packetStartedAt);
+		TickProfiler::recordInterruptContributor("handler", "AsyncPool", $interruptStartedAt);
+		self::assertSame(0, TickProfiler::startTimer());
 
 		TickProfiler::beginTick(7);
 		TickProfiler::finishTick(1);
@@ -41,6 +44,26 @@ final class TickProfilerTest extends TestCase{
 		$sample = TickProfiler::getLastSample();
 		self::assertNotNull($sample);
 		self::assertSame("AsyncPool", $sample["contributors"]["interrupt_handler"][0]["name"]);
+		self::assertSame("MovePlayerPacket", $sample["contributors"]["interrupt_packet_receive"][0]["name"]);
+	}
+
+	public function testRecordsGarbageCollectorTriggerDetails() : void{
+		TickProfiler::enable();
+		TickProfiler::beginTick(8);
+		TickProfiler::recordGarbageCollection("threshold", 10_001, 0, 10_001, 20_001, 0, 41_612_000);
+		TickProfiler::finishTick(0);
+
+		$sample = TickProfiler::getLastSample();
+		self::assertNotNull($sample);
+		self::assertSame([
+			"source" => "threshold",
+			"roots_before" => 10_001,
+			"roots_after" => 0,
+			"threshold_before" => 10_001,
+			"threshold_after" => 20_001,
+			"cycles" => 0,
+			"duration_ms" => 41.612,
+		], $sample["garbage_collections"][0]);
 	}
 
 	public function testDormantTimersDoNotCollect() : void{

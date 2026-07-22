@@ -31,6 +31,7 @@ namespace pocketmine\debug;
 final class TickProfiler{
 	private static bool $enabled = false;
 	private static bool $tickActive = false;
+	private static int $interruptDepth = 0;
 	private static int $tick = 0;
 	private static int $tickStartedAtNs = 0;
 	private static int $previousTickStartedAtNs = 0;
@@ -45,8 +46,12 @@ final class TickProfiler{
 	private static array $phases = [];
 	/** @var array<string, array<string, array{total_ns: int, max_ns: int, calls: int}>> */
 	private static array $contributors = [];
-	/** @var array<string, array{total_ns: int, max_ns: int, calls: int}> */
+	/** @var array<string, array<string, array{total_ns: int, max_ns: int, calls: int}>> */
 	private static array $pendingInterruptContributors = [];
+	/** @var list<array{source: string, roots_before: int, roots_after: int, threshold_before: int, threshold_after: int, cycles: int, duration_ms: float}> */
+	private static array $garbageCollections = [];
+	/** @var list<array{source: string, roots_before: int, roots_after: int, threshold_before: int, threshold_after: int, cycles: int, duration_ms: float}> */
+	private static array $pendingGarbageCollections = [];
 	/**
 	 * @var null|array{
 	 *     tick: int,
@@ -60,6 +65,7 @@ final class TickProfiler{
 	 *     memory_delta_kb: float,
 	 *     gc_runs: int,
 	 *     gc_collected: int,
+	 *     garbage_collections: list<array{source: string, roots_before: int, roots_after: int, threshold_before: int, threshold_after: int, cycles: int, duration_ms: float}>,
 	 *     cpu_user_ms: float,
 	 *     cpu_system_ms: float,
 	 *     voluntary_context_switches: int,
@@ -78,9 +84,11 @@ final class TickProfiler{
 	public static function enable() : void{
 		self::$enabled = true;
 		self::$tickActive = false;
+		self::$interruptDepth = 0;
 		self::$lastSample = null;
 		self::$previousTickStartedAtNs = 0;
 		self::$pendingInterruptContributors = [];
+		self::$pendingGarbageCollections = [];
 		self::clearTickState();
 	}
 
@@ -88,8 +96,10 @@ final class TickProfiler{
 	public static function disable() : void{
 		self::$enabled = false;
 		self::$tickActive = false;
+		self::$interruptDepth = 0;
 		self::$lastSample = null;
 		self::$pendingInterruptContributors = [];
+		self::$pendingGarbageCollections = [];
 		self::clearTickState();
 	}
 
@@ -105,9 +115,11 @@ final class TickProfiler{
 
 		self::clearTickState();
 		if(self::$pendingInterruptContributors !== []){
-			self::$contributors["interrupt_handler"] = self::$pendingInterruptContributors;
+			self::$contributors = self::$pendingInterruptContributors;
 			self::$pendingInterruptContributors = [];
 		}
+		self::$garbageCollections = self::$pendingGarbageCollections;
+		self::$pendingGarbageCollections = [];
 		self::$tickActive = true;
 		self::$tick = $tick;
 		self::$tickStartedAtNs = (int) hrtime(true);
@@ -120,12 +132,16 @@ final class TickProfiler{
 
 	/** Returns a monotonic timer token, or zero while profiling is dormant. */
 	public static function startTimer() : int{
-		return self::$tickActive ? (int) hrtime(true) : 0;
+		return self::$tickActive || self::$interruptDepth > 0 ? (int) hrtime(true) : 0;
 	}
 
-	/** Returns a timer token for work executed by sleeper callbacks between ticks. */
+	/** Opens a profiling context for work executed by a sleeper callback between ticks. */
 	public static function startInterruptTimer() : int{
-		return self::$enabled ? (int) hrtime(true) : 0;
+		if(!self::$enabled){
+			return 0;
+		}
+		self::$interruptDepth++;
+		return (int) hrtime(true);
 	}
 
 	/** Adds an exclusive top-level server phase to the current tick. */
@@ -136,22 +152,66 @@ final class TickProfiler{
 		self::$phases[$name] = (self::$phases[$name] ?? 0) + ((int) hrtime(true) - $startedAtNs);
 	}
 
-	/** Adds one nested task/event/packet/world contributor to the current tick. */
+	/** Adds one nested contributor to either the active tick or the current between-tick callback. */
 	public static function recordContributor(string $category, string $name, int $startedAtNs) : void{
-		if($startedAtNs === 0 || !self::$tickActive){
+		if($startedAtNs === 0){
 			return;
 		}
 
-		self::$contributors[$category] ??= [];
-		self::addContributor(self::$contributors[$category], $name, (int) hrtime(true) - $startedAtNs);
+		if(self::$tickActive){
+			self::$contributors[$category] ??= [];
+			self::addContributor(self::$contributors[$category], $name, (int) hrtime(true) - $startedAtNs);
+		}elseif(self::$interruptDepth > 0){
+			$interruptCategory = "interrupt_" . $category;
+			self::$pendingInterruptContributors[$interruptCategory] ??= [];
+			self::addContributor(self::$pendingInterruptContributors[$interruptCategory], $name, (int) hrtime(true) - $startedAtNs);
+		}
 	}
 
 	/** Records a sleeper callback which ran outside the active server tick. */
-	public static function recordInterruptContributor(string $name, int $startedAtNs) : void{
-		if($startedAtNs === 0 || !self::$enabled){
+	public static function recordInterruptContributor(string $category, string $name, int $startedAtNs) : void{
+		if($startedAtNs === 0){
 			return;
 		}
-		self::addContributor(self::$pendingInterruptContributors, $name, (int) hrtime(true) - $startedAtNs);
+
+		self::$interruptDepth = max(0, self::$interruptDepth - 1);
+		if(!self::$enabled){
+			return;
+		}
+
+		$interruptCategory = "interrupt_" . $category;
+		self::$pendingInterruptContributors[$interruptCategory] ??= [];
+		self::addContributor(self::$pendingInterruptContributors[$interruptCategory], $name, (int) hrtime(true) - $startedAtNs);
+	}
+
+	/** Records one explicit cyclic-GC invocation with its trigger and buffer state. */
+	public static function recordGarbageCollection(
+		string $source,
+		int $rootsBefore,
+		int $rootsAfter,
+		int $thresholdBefore,
+		int $thresholdAfter,
+		int $cycles,
+		int $durationNs
+	) : void{
+		if(!self::$enabled){
+			return;
+		}
+
+		$entry = [
+			"source" => self::normalizeName($source),
+			"roots_before" => $rootsBefore,
+			"roots_after" => $rootsAfter,
+			"threshold_before" => $thresholdBefore,
+			"threshold_after" => $thresholdAfter,
+			"cycles" => $cycles,
+			"duration_ms" => $durationNs / 1_000_000,
+		];
+		if(self::$tickActive){
+			self::$garbageCollections[] = $entry;
+		}else{
+			self::$pendingGarbageCollections[] = $entry;
+		}
 	}
 
 	/** Finalizes the active tick after timings bookkeeping has completed. */
@@ -196,6 +256,7 @@ final class TickProfiler{
 			"memory_delta_kb" => (float) ((memory_get_usage(false) - self::$memoryStartedAt) / 1024),
 			"gc_runs" => ($garbageCollector["runs"] ?? 0) - (self::$garbageCollectorStartedAt["runs"] ?? 0),
 			"gc_collected" => ($garbageCollector["collected"] ?? 0) - (self::$garbageCollectorStartedAt["collected"] ?? 0),
+			"garbage_collections" => self::$garbageCollections,
 			"cpu_user_ms" => self::resourceUsageDeltaMs($resourceUsage, self::$resourceUsageStartedAt, "user_us"),
 			"cpu_system_ms" => self::resourceUsageDeltaMs($resourceUsage, self::$resourceUsageStartedAt, "system_us"),
 			"voluntary_context_switches" => self::resourceUsageDelta($resourceUsage, self::$resourceUsageStartedAt, "voluntary_context_switches"),
@@ -221,6 +282,7 @@ final class TickProfiler{
 	 *     memory_delta_kb: float,
 	 *     gc_runs: int,
 	 *     gc_collected: int,
+	 *     garbage_collections: list<array{source: string, roots_before: int, roots_after: int, threshold_before: int, threshold_after: int, cycles: int, duration_ms: float}>,
 	 *     cpu_user_ms: float,
 	 *     cpu_system_ms: float,
 	 *     voluntary_context_switches: int,
@@ -236,6 +298,7 @@ final class TickProfiler{
 	private static function clearTickState() : void{
 		self::$phases = [];
 		self::$contributors = [];
+		self::$garbageCollections = [];
 		self::$resourceUsageStartedAt = [];
 		self::$garbageCollectorStartedAt = [];
 	}

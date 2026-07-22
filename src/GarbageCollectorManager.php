@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\timings\TimingsHandler;
 use function gc_collect_cycles;
 use function gc_disable;
@@ -30,8 +31,6 @@ use function gc_status;
 use function hrtime;
 use function max;
 use function min;
-use function number_format;
-use function sprintf;
 
 /**
  * Allows threads to manually trigger the cyclic garbage collector using a threshold like PHP's own garbage collector,
@@ -51,15 +50,12 @@ final class GarbageCollectorManager{
 	private int $collectionTimeTotalNs = 0;
 	private int $runs = 0;
 
-	private \Logger $logger;
 	private TimingsHandler $timings;
 
 	public function __construct(
-		\Logger $logger,
 		?TimingsHandler $parentTimings,
 	){
 		gc_disable();
-		$this->logger = new \PrefixedLogger($logger, "Cyclic Garbage Collector");
 		$this->timings = new TimingsHandler("Cyclic Garbage Collector", $parentTimings);
 	}
 
@@ -87,6 +83,7 @@ final class GarbageCollectorManager{
 
 		$this->timings->startTiming();
 
+		$thresholdBefore = $this->threshold;
 		$start = hrtime(true);
 		$cycles = gc_collect_cycles();
 		$end = hrtime(true);
@@ -99,7 +96,16 @@ final class GarbageCollectorManager{
 		$time = $end - $start;
 		$this->collectionTimeTotalNs += $time;
 		$this->runs++;
-			/** [BETTERPMMP-PATCH] GC log output removed */
+		TickProfiler::recordGarbageCollection(
+			"threshold",
+			$rootsBefore,
+			$rootsAfter,
+			$thresholdBefore,
+			$this->threshold,
+			$cycles,
+			$time
+		);
+		/** [BETTERPMMP-PATCH] GC log output removed */
 
 		return $cycles;
 	}

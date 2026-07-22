@@ -145,6 +145,7 @@ final class PerformanceDebugManager{
 	 *     memory_delta_kb: float,
 	 *     gc_runs: int,
 	 *     gc_collected: int,
+	 *     garbage_collections: list<array{source: string, roots_before: int, roots_after: int, threshold_before: int, threshold_after: int, cycles: int, duration_ms: float}>,
 	 *     cpu_user_ms: float,
 	 *     cpu_system_ms: float,
 	 *     voluntary_context_switches: int,
@@ -176,8 +177,22 @@ final class PerformanceDebugManager{
 			}
 		}
 
+		$garbageCollections = [];
+		foreach($sample["garbage_collections"] as $entry){
+			$garbageCollections[] = sprintf(
+				"%s{roots=%d>%d|threshold=%d>%d|cycles=%d|ms=%.3f}",
+				$entry["source"],
+				$entry["roots_before"],
+				$entry["roots_after"],
+				$entry["threshold_before"],
+				$entry["threshold_after"],
+				$entry["cycles"],
+				$entry["duration_ms"]
+			);
+		}
+
 		return sprintf(
-			"[tick:%d,gap:%.3f,total:%.3f,active:%.3f,interrupt:%.3f,unaccounted:%.3f,cpu_user:%.3f,cpu_sys:%.3f,mem_delta_kb:%.1f,gc_runs:%d,gc_collected:%d,vcsw:%d,ivcsw:%d,minflt:%d,majflt:%d,phases:%s,tops:%s]",
+			"[tick:%d,gap:%.3f,total:%.3f,active:%.3f,interrupt:%.3f,unaccounted:%.3f,cpu_user:%.3f,cpu_sys:%.3f,mem_delta_kb:%.1f,gc_runs:%d,gc_collected:%d,gc_detail:%s,vcsw:%d,ivcsw:%d,minflt:%d,majflt:%d,phases:%s,tops:%s]",
 			$sample["tick"],
 			$sample["gap_ms"],
 			$sample["total_ms"],
@@ -189,6 +204,7 @@ final class PerformanceDebugManager{
 			$sample["memory_delta_kb"],
 			$sample["gc_runs"],
 			$sample["gc_collected"],
+			$garbageCollections === [] ? "none" : implode(";", $garbageCollections),
 			$sample["voluntary_context_switches"],
 			$sample["involuntary_context_switches"],
 			$sample["minor_page_faults"],
