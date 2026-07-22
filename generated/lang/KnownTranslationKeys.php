@@ -523,6 +523,7 @@ final class KnownTranslationKeys{
 	public const POCKETMINE_PERMISSION_COMMAND_OP_GIVE = "pocketmine.permission.command.op.give";
 	public const POCKETMINE_PERMISSION_COMMAND_OP_TAKE = "pocketmine.permission.command.op.take";
 	public const POCKETMINE_PERMISSION_COMMAND_PARTICLE = "pocketmine.permission.command.particle";
+	public const POCKETMINE_PERMISSION_COMMAND_PERFDEBUG = "pocketmine.permission.command.perfdebug";
 	public const POCKETMINE_PERMISSION_COMMAND_PLUGINS = "pocketmine.permission.command.plugins";
 	public const POCKETMINE_PERMISSION_COMMAND_RELOAD = "pocketmine.permission.command.reload";
 	public const POCKETMINE_PERMISSION_COMMAND_SAVE_DISABLE = "pocketmine.permission.command.save.disable";
