@@ -98,6 +98,7 @@ abstract class DefaultPermissions{
 			Names::COMMAND_OP_GIVE,
 			Names::COMMAND_OP_TAKE,
 			Names::COMMAND_PARTICLE,
+			Names::COMMAND_PERFDEBUG,
 			Names::COMMAND_PLUGINS,
 			Names::COMMAND_RELOAD,
 			Names::COMMAND_SAVE_DISABLE,

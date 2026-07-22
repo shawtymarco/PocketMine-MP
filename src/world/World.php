@@ -43,6 +43,7 @@ use pocketmine\data\bedrock\BiomeIds;
 use pocketmine\data\bedrock\block\BlockStateData;
 use pocketmine\data\bedrock\block\BlockStateDeserializeException;
 use pocketmine\data\SavedDataLoadingException;
+use pocketmine\debug\TickProfiler;
 use pocketmine\entity\Entity;
 use pocketmine\entity\EntityFactory;
 use pocketmine\entity\Location;
@@ -1032,6 +1033,8 @@ class World implements ChunkManager{
 	}
 
 	protected function actuallyDoTick(int $currentTick) : void{
+		$profiling = TickProfiler::isEnabled();
+		$sectionStartedAt = TickProfiler::startTimer();
 		if(!$this->stopTime){
 			//this simulates an overflow, as would happen in any language which doesn't do stupid things to var types
 			if($this->time === PHP_INT_MAX){
@@ -1054,7 +1057,11 @@ class World implements ChunkManager{
 			$this->provider->doGarbageCollection();
 			$this->providerGarbageCollectionTicker = 0;
 		}
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":preparation", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		$this->timings->scheduledBlockUpdates->startTiming();
 		//Delayed updates
 		while($this->scheduledBlockUpdateQueue->count() > 0 && $this->scheduledBlockUpdateQueue->current()["priority"] <= $currentTick){
@@ -1065,10 +1072,18 @@ class World implements ChunkManager{
 				continue;
 			}
 			$block = $this->getBlock($vec);
+			$blockStartedAt = TickProfiler::startTimer();
 			$block->onScheduledUpdate();
+			if($profiling){
+				TickProfiler::recordContributor("block_update", $this->folderName . ":scheduled:" . get_class($block), $blockStartedAt);
+			}
 		}
 		$this->timings->scheduledBlockUpdates->stopTiming();
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":scheduled_blocks", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		$this->timings->neighbourBlockUpdates->startTiming();
 		//Normal updates
 		while($this->neighbourBlockUpdateQueue->count() > 0){
@@ -1080,6 +1095,7 @@ class World implements ChunkManager{
 			}
 
 			$block = $this->getBlockAt($x, $y, $z);
+			$blockStartedAt = TickProfiler::startTimer();
 
 			if(BlockUpdateEvent::hasHandlers()){
 				$ev = new BlockUpdateEvent($block);
@@ -1092,28 +1108,51 @@ class World implements ChunkManager{
 				$entity->onNearbyBlockChange();
 			}
 			$block->onNearbyBlockChange();
+			if($profiling){
+				TickProfiler::recordContributor("block_update", $this->folderName . ":neighbour:" . get_class($block), $blockStartedAt);
+			}
 		}
 
 		$this->timings->neighbourBlockUpdates->stopTiming();
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":neighbour_blocks", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		$this->timings->entityTick->startTiming();
 		//Update entities that need update
 		foreach($this->updateEntities as $id => $entity){
+			$entityStartedAt = TickProfiler::startTimer();
 			if($entity->isClosed() || $entity->isFlaggedForDespawn() || !$entity->onUpdate($currentTick)){
 				unset($this->updateEntities[$id]);
 			}
 			if($entity->isFlaggedForDespawn()){
 				$entity->close();
 			}
+			if($profiling){
+				TickProfiler::recordContributor("entity", $this->folderName . ":" . get_class($entity), $entityStartedAt);
+			}
 		}
 		$this->timings->entityTick->stopTiming();
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":entities", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		$this->timings->randomChunkUpdates->startTiming();
 		$this->tickChunks();
 		$this->timings->randomChunkUpdates->stopTiming();
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":random_chunks", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		$this->executeQueuedLightUpdates();
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":lighting", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		if(count($this->changedBlocks) > 0){
 			if(count($this->players) > 0){
 				foreach($this->changedBlocks as $index => $blocks){
@@ -1143,7 +1182,11 @@ class World implements ChunkManager{
 		if($this->sleepTicks > 0 && --$this->sleepTicks <= 0){
 			$this->checkSleep();
 		}
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":block_changes", $sectionStartedAt);
+		}
 
+		$sectionStartedAt = TickProfiler::startTimer();
 		foreach($this->packetBuffersByChunkTypeConverter as $index => $entries){
 			World::getXZ($index, $chunkX, $chunkZ);
 			TypeConverter::broadcastByTypeConverter($this->getChunkPlayers($chunkX, $chunkZ), function(TypeConverter $typeConverter) use ($index, $entries) : array{
@@ -1165,6 +1208,9 @@ class World implements ChunkManager{
 
 		$this->packetBuffersByChunk = [];
 		$this->packetBuffersByChunkTypeConverter = [];
+		if($profiling){
+			TickProfiler::recordContributor("world_section", $this->folderName . ":packet_buffers", $sectionStartedAt);
+		}
 	}
 
 	public function checkSleep() : void{

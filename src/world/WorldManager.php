@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine\world;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\entity\Entity;
 use pocketmine\event\world\WorldInitEvent;
 use pocketmine\event\world\WorldLoadEvent;
@@ -347,8 +348,10 @@ class WorldManager{
 				continue;
 			}
 
+			$profileStartedAt = TickProfiler::startTimer();
 			$worldTime = microtime(true);
 			$world->doTick($currentTick);
+			TickProfiler::recordContributor("world", $world->getFolderName(), $profileStartedAt);
 			$tickMs = (microtime(true) - $worldTime) * 1000;
 			$world->tickRateTime = $tickMs;
 			if($tickMs >= Server::TARGET_SECONDS_PER_TICK * 1000){
@@ -359,8 +362,10 @@ class WorldManager{
 		if($this->autoSave && ++$this->autoSaveTicker >= $this->autoSaveTicks){
 			$this->autoSaveTicker = 0;
 			$this->server->getLogger()->debug("[Auto Save] Saving worlds...");
+			$profileStartedAt = TickProfiler::startTimer();
 			$start = microtime(true);
 			$this->doAutoSave();
+			TickProfiler::recordContributor("world", "autosave", $profileStartedAt);
 			$time = microtime(true) - $start;
 			$this->server->getLogger()->debug("[Auto Save] Save completed in " . ($time >= 1 ? round($time, 3) . "s" : round($time * 1000) . "ms"));
 		}

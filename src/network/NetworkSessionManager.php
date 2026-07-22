@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine\network;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\lang\Translatable;
 use pocketmine\network\mcpe\NetworkSession;
 use function count;
@@ -93,7 +94,11 @@ class NetworkSessionManager{
 	 */
 	public function tick() : void{
 		foreach($this->sessions as $k => $session){
+			$profileStartedAt = TickProfiler::startTimer();
 			$session->tick();
+			if($profileStartedAt !== 0){
+				TickProfiler::recordContributor("network_session", $session->getDisplayName(), $profileStartedAt);
+			}
 			if(!$session->isConnected()){
 				unset($this->sessions[$k]);
 			}

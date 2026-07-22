@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine\event;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\plugin\Plugin;
 use pocketmine\timings\TimingsHandler;
 use function in_array;
@@ -31,6 +32,8 @@ use function in_array;
  * @phpstan-template TEvent of Event
  */
 class RegisteredListener{
+	private string $profileName;
+
 	/**
 	 * @phpstan-param \Closure(TEvent) : void $handler
 	 */
@@ -39,11 +42,14 @@ class RegisteredListener{
 		private int $priority,
 		private Plugin $plugin,
 		private bool $handleCancelled,
-		private TimingsHandler $timings
+		private TimingsHandler $timings,
+		string $eventName = "unknown",
+		string $handlerName = "unknown"
 	){
 		if(!in_array($priority, EventPriority::ALL, true)){
 			throw new \InvalidArgumentException("Invalid priority number $priority");
 		}
+		$this->profileName = $eventName . "@" . $plugin->getName() . ":" . $handlerName;
 	}
 
 	/**
@@ -68,11 +74,13 @@ class RegisteredListener{
 		if($event instanceof Cancellable && $event->isCancelled() && !$this->isHandlingCancelled()){
 			return;
 		}
+		$profileStartedAt = TickProfiler::startTimer();
 		$this->timings->startTiming();
 		try{
 			($this->handler)($event);
 		}finally{
 			$this->timings->stopTiming();
+			TickProfiler::recordContributor("event", $this->profileName, $profileStartedAt);
 		}
 	}
 

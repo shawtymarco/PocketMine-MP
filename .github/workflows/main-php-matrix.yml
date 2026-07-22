@@ -123,7 +123,7 @@ jobs:
   codegen:
     name: Generated Code consistency checks
     runs-on: ${{ inputs.image }}
-    # Downstream fork: generated-code drift (hand-edited betterpmmp constants) is informational and must not block CI.
+    # Downstream fork: generated-code drift (hand-edited PMMP-MV constants) is informational and must not block CI.
     continue-on-error: true
     strategy:
       fail-fast: false

@@ -1111,7 +1111,7 @@ class PluginManager{
 
 		$timings = Timings::getEventHandlerTimings($event, $handlerName, $plugin->getDescription()->getFullName());
 
-		$registeredListener = new RegisteredListener($handler, $priority, $plugin, $handleCancelled, $timings);
+		$registeredListener = new RegisteredListener($handler, $priority, $plugin, $handleCancelled, $timings, $event, $handlerName);
 		HandlerListManager::global()->getListFor($event)->register($registeredListener);
 		return $registeredListener;
 	}

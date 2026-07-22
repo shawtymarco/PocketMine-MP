@@ -37,6 +37,8 @@ use pocketmine\crafting\CraftingManagerFromDataHelper;
 use pocketmine\crash\CrashDump;
 use pocketmine\crash\CrashDumpRenderer;
 use pocketmine\data\bedrock\BedrockDataFiles;
+use pocketmine\debug\PerformanceDebugManager;
+use pocketmine\debug\TickProfiler;
 use pocketmine\entity\EntityDataHelper;
 use pocketmine\entity\Location;
 use pocketmine\event\HandlerListManager;
@@ -263,6 +265,7 @@ class Server{
 	private ?ConsoleCommandSender $consoleSender = null;
 
 	private SimpleCommandMap $commandMap;
+	private PerformanceDebugManager $performanceDebugManager;
 
 	private CraftingManager $craftingManager;
 
@@ -504,6 +507,11 @@ class Server{
 
 	public function getCommandMap() : SimpleCommandMap{
 		return $this->commandMap;
+	}
+
+	/** Returns the manager backing the built-in /perfdebug command. */
+	public function getPerformanceDebugManager() : PerformanceDebugManager{
+		return $this->performanceDebugManager;
 	}
 
 	/**
@@ -1052,6 +1060,7 @@ class Server{
 
 			DefaultPermissions::registerCorePermissions();
 
+			$this->performanceDebugManager = new PerformanceDebugManager($this);
 			$this->commandMap = new SimpleCommandMap($this);
 
 			$this->craftingManager = CraftingManagerFromDataHelper::make(BedrockDataFiles::RECIPES);
@@ -1909,21 +1918,31 @@ class Server{
 		Timings::$serverTick->startTiming();
 
 		++$this->tickCounter;
+		TickProfiler::beginTick($this->tickCounter);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		Timings::$scheduler->startTiming();
 		$this->pluginManager->tickSchedulers($this->tickCounter);
 		Timings::$scheduler->stopTiming();
+		TickProfiler::recordPhase("scheduler", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		Timings::$schedulerAsync->startTiming();
 		$this->asyncPool->collectTasks();
 		Timings::$schedulerAsync->stopTiming();
+		TickProfiler::recordPhase("async_collect", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		$this->worldManager->tick($this->tickCounter);
+		TickProfiler::recordPhase("worlds", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		Timings::$connection->startTiming();
 		$this->network->tick();
 		Timings::$connection->stopTiming();
+		TickProfiler::recordPhase("network", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		if(($this->tickCounter % self::TARGET_TICKS_PER_SECOND) === 0){
 			if($this->doTitleTick){
 				$this->titleTick();
@@ -1938,7 +1957,9 @@ class Server{
 			$this->network->updateName();
 			$this->network->getBandwidthTracker()->rotateAverageHistory();
 		}
+		TickProfiler::recordPhase("status", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		if($this->sendUsageTicker > 0 && --$this->sendUsageTicker === 0){
 			$this->sendUsageTicker = self::TICKS_PER_STATS_REPORT;
 			$this->sendUsage(SendUsageTask::TYPE_STATUS);
@@ -1953,9 +1974,13 @@ class Server{
 		if(($this->tickCounter % self::TICKS_PER_TPS_OVERLOAD_WARNING) === 0 && $this->getTicksPerSecondAverage() < self::TPS_OVERLOAD_WARNING_THRESHOLD){
 			$this->logger->warning($this->language->translate(KnownTranslationFactory::pocketmine_server_tickOverload()));
 		}
+		TickProfiler::recordPhase("maintenance", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		$this->memoryManager->check();
+		TickProfiler::recordPhase("memory", $phaseStartedAt);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		if($this->console !== null){
 			Timings::$serverCommand->startTiming();
 			while(($line = $this->console->readLine()) !== null){
@@ -1964,20 +1989,26 @@ class Server{
 			}
 			Timings::$serverCommand->stopTiming();
 		}
+		TickProfiler::recordPhase("console", $phaseStartedAt);
 
 		Timings::$serverTick->stopTiming();
 
 		$now = microtime(true);
-		$totalTickTimeSeconds = $now - $tickTime + ($this->tickSleeper->getNotificationProcessingTime() / 1_000_000_000);
+		$notificationProcessingTimeNs = $this->tickSleeper->getNotificationProcessingTime();
+		$totalTickTimeSeconds = $now - $tickTime + ($notificationProcessingTimeNs / 1_000_000_000);
 		$this->currentTPS = min(self::TARGET_TICKS_PER_SECOND, 1 / max(0.001, $totalTickTimeSeconds));
 		$this->currentUse = min(1, $totalTickTimeSeconds / self::TARGET_SECONDS_PER_TICK);
 
+		$phaseStartedAt = TickProfiler::startTimer();
 		TimingsHandler::tick($this->currentTPS <= $this->profilingTickRate);
+		TickProfiler::recordPhase("timings_finalize", $phaseStartedAt);
+		TickProfiler::finishTick($notificationProcessingTimeNs);
 
 		$idx = $this->tickCounter % self::TARGET_TICKS_PER_SECOND;
 		$this->tickAverage[$idx] = $this->currentTPS;
 		$this->useAverage[$idx] = $this->currentUse;
 		$this->tickSleeper->resetNotificationProcessingTime();
+		$this->performanceDebugManager->onTickComplete();
 
 		if(($this->nextTick - $tickTime) < -1){
 			$this->nextTick = $tickTime;

@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\snooze\SleeperHandler;
 use pocketmine\snooze\SleeperHandlerEntry;
 use pocketmine\timings\TimingsHandler;
@@ -53,10 +54,15 @@ final class TimeTrackingSleeperHandler extends SleeperHandler{
 		$name = Utils::getNiceClosureName($handler);
 		$timings = self::$handlerTimings[$name] ??= new TimingsHandler("Snooze Handler: " . $name, $this->timings);
 
-		return parent::addNotifier(function() use ($timings, $handler) : void{
+		return parent::addNotifier(function() use ($timings, $handler, $name) : void{
+			$profileStartedAt = TickProfiler::startInterruptTimer();
 			$timings->startTiming();
-			$handler();
-			$timings->stopTiming();
+			try{
+				$handler();
+			}finally{
+				$timings->stopTiming();
+				TickProfiler::recordInterruptContributor($name, $profileStartedAt);
+			}
 		});
 	}
 

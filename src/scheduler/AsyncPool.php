@@ -24,6 +24,7 @@ declare(strict_types=1);
 namespace pocketmine\scheduler;
 
 use pmmp\thread\Thread as NativeThread;
+use pocketmine\debug\TickProfiler;
 use pocketmine\snooze\SleeperHandler;
 use pocketmine\thread\log\ThreadSafeLogger;
 use pocketmine\thread\ThreadCrashException;
@@ -276,9 +277,16 @@ class AsyncPool{
 					 * been consumed before completing.
 					 */
 					$this->checkTaskProgressUpdates($task);
-					Timings::getAsyncTaskCompletionTimings($task)->time(function() use ($task) : void{
-						$task->onCompletion();
-					});
+					$profileStartedAt = TickProfiler::startTimer();
+					try{
+						Timings::getAsyncTaskCompletionTimings($task)->time(function() use ($task) : void{
+							$task->onCompletion();
+						});
+					}finally{
+						if($profileStartedAt !== 0){
+							TickProfiler::recordContributor("async_completion", get_class($task), $profileStartedAt);
+						}
+					}
 				}
 			}else{
 				$this->checkTaskProgressUpdates($task);
@@ -331,8 +339,15 @@ class AsyncPool{
 	}
 
 	private function checkTaskProgressUpdates(AsyncTask $task) : void{
-		Timings::getAsyncTaskProgressUpdateTimings($task)->time(function() use ($task) : void{
-			$task->checkProgressUpdates();
-		});
+		$profileStartedAt = TickProfiler::startTimer();
+		try{
+			Timings::getAsyncTaskProgressUpdateTimings($task)->time(function() use ($task) : void{
+				$task->checkProgressUpdates();
+			});
+		}finally{
+			if($profileStartedAt !== 0){
+				TickProfiler::recordContributor("async_progress", get_class($task), $profileStartedAt);
+			}
+		}
 	}
 }

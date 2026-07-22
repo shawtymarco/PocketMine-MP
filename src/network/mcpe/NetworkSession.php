@@ -26,6 +26,7 @@ namespace pocketmine\network\mcpe;
 use pmmp\encoding\ByteBufferReader;
 use pmmp\encoding\ByteBufferWriter;
 use pmmp\encoding\DataDecodeException;
+use pocketmine\debug\TickProfiler;
 use pocketmine\entity\effect\EffectInstance;
 use pocketmine\event\player\PlayerDuplicateLoginEvent;
 use pocketmine\event\player\PlayerResourcePackOfferEvent;
@@ -528,6 +529,7 @@ class NetworkSession{
 			throw new PacketHandlingException("Unexpected non-serverbound packet");
 		}
 
+		$profileStartedAt = TickProfiler::startTimer();
 		$timings = Timings::getReceiveDataPacketTimings($packet);
 		$timings->startTiming();
 
@@ -596,6 +598,9 @@ class NetworkSession{
 			}
 		}finally{
 			$timings->stopTiming();
+			if($profileStartedAt !== 0){
+				TickProfiler::recordContributor("packet_receive", $packet->getName(), $profileStartedAt);
+			}
 		}
 	}
 
@@ -624,6 +629,7 @@ class NetworkSession{
 			throw new \InvalidArgumentException("Attempted to send " . get_class($packet) . " to " . $this->getDisplayName() . " too early");
 		}
 
+		$profileStartedAt = TickProfiler::startTimer();
 		$timings = Timings::getSendDataPacketTimings($packet);
 		$timings->startTiming();
 		try{
@@ -653,6 +659,9 @@ class NetworkSession{
 			return true;
 		}finally{
 			$timings->stopTiming();
+			if($profileStartedAt !== 0){
+				TickProfiler::recordContributor("packet_send", $packet->getName(), $profileStartedAt);
+			}
 		}
 	}
 
@@ -697,6 +706,7 @@ class NetworkSession{
 
 	private function flushGamePacketQueue() : void{
 		if(count($this->sendBuffer) > 0){
+			$profileStartedAt = TickProfiler::startTimer();
 			Timings::$playerNetworkSend->startTiming();
 			try{
 				$syncMode = null; //automatic
@@ -720,6 +730,9 @@ class NetworkSession{
 				$this->queueCompressedNoGamePacketFlush($batch, networkFlush: true, ackPromises: $ackPromises);
 			}finally{
 				Timings::$playerNetworkSend->stopTiming();
+				if($profileStartedAt !== 0){
+					TickProfiler::recordContributor("network_flush", $this->getDisplayName(), $profileStartedAt);
+				}
 			}
 		}
 	}

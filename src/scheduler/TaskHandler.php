@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 namespace pocketmine\scheduler;
 
+use pocketmine\debug\TickProfiler;
 use pocketmine\timings\Timings;
 use pocketmine\timings\TimingsHandler;
 
@@ -117,6 +118,7 @@ class TaskHandler{
 	 * @internal
 	 */
 	public function run() : void{
+		$profileStartedAt = TickProfiler::startTimer();
 		$this->timings->startTiming();
 		try{
 			$this->task->onRun();
@@ -124,6 +126,7 @@ class TaskHandler{
 			$this->cancel();
 		}finally{
 			$this->timings->stopTiming();
+			TickProfiler::recordContributor("task", $this->ownerName . ":" . $this->taskName, $profileStartedAt);
 		}
 	}
 
