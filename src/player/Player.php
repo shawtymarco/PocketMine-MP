@@ -1019,8 +1019,12 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		if(is_array($perWorldViewDistance)){
 			$worldFolder = $world->getFolderName();
 			if(isset($perWorldViewDistance[$worldFolder])){
-				$effectiveViewDistance = min($effectiveViewDistance, max(2, (int) $perWorldViewDistance[$worldFolder]));
+				$effectiveViewDistance = min($effectiveViewDistance, max(1, (int) $perWorldViewDistance[$worldFolder]));
 			}
+		}
+		if($this->spawnChunkLoadCount !== -1){
+			// A per-world cap must also lower the terrain-ready threshold or login can wait for chunks that will never be sent.
+			$this->spawnThreshold = (int) (min($effectiveViewDistance, $this->server->getConfigGroup()->getPropertyInt(YmlServerProperties::CHUNK_SENDING_SPAWN_RADIUS, 4)) ** 2 * M_PI);
 		}
 		foreach($this->chunkSelector->selectChunks(
 			$effectiveViewDistance,
@@ -1047,7 +1051,7 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		$this->tickingChunks = $tickingChunks;
 
 		if(count($this->loadQueue) > 0 || count($unloadChunks) > 0){
-			$this->getNetworkSession()->syncViewAreaCenterPoint($this->location, $this->viewDistance);
+			$this->getNetworkSession()->syncViewAreaCenterPoint($this->location, $effectiveViewDistance);
 		}
 
 		Timings::$playerChunkOrder->stopTiming();
