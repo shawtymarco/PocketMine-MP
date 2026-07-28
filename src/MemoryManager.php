@@ -195,17 +195,24 @@ class MemoryManager{
 			}
 		}
 
-		if($this->garbageCollectionPeriod > 0 && ++$this->garbageCollectionTicker >= $this->garbageCollectionPeriod){
-			$this->garbageCollectionTicker = 0;
-			$this->triggerGarbageCollector("periodic");
-		}else{
-			$this->cycleGcManager->maybeCollectCycles();
+		// A zero period explicitly keeps main-thread cyclic GC disabled, including threshold-based collection.
+		if($this->garbageCollectionPeriod > 0){
+			if(++$this->garbageCollectionTicker >= $this->garbageCollectionPeriod){
+				$this->garbageCollectionTicker = 0;
+				$this->triggerGarbageCollector("periodic");
+			}else{
+				$this->cycleGcManager->maybeCollectCycles();
+			}
 		}
 
 		Timings::$memoryManager->stopTiming();
 	}
 
 	public function triggerGarbageCollector(string $source = "manual") : int{
+		if($this->garbageCollectionPeriod <= 0){
+			return 0;
+		}
+
 		Timings::$garbageCollector->startTiming();
 		$startedAt = hrtime(true);
 		$rootsBefore = gc_status()["roots"];
