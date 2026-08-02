@@ -128,6 +128,7 @@ use function array_slice;
 use function array_values;
 use function base64_encode;
 use function bin2hex;
+use function chr;
 use function count;
 use function get_class;
 use function implode;
@@ -685,6 +686,74 @@ class NetworkSession{
 
 	public function sendDataPacket(ClientboundPacket $packet, bool $immediate = false) : bool{
 		return $this->sendDataPacketInternal($packet, $immediate, null);
+	}
+
+	/**
+	 * Sends an approved combat feedback batch without waiting for the normal game-packet or compression queues.
+	 *
+	 * @param ClientboundPacket[] $packets
+	 * @phpstan-param list<ClientboundPacket> $packets
+	 * @internal
+	 */
+	public function sendCombatPacketBatch(array $packets) : bool{
+		if(!$this->connected || count($packets) === 0){
+			return false;
+		}
+
+		foreach($packets as $packet){
+			if(!$this->loggedIn && !$packet->canBeSentBeforeLogin()){
+				throw new \InvalidArgumentException("Attempted to send " . get_class($packet) . " to " . $this->getDisplayName() . " too early");
+			}
+		}
+
+		if(DataPacketSendEvent::hasHandlers()){
+			$ev = new DataPacketSendEvent([$this], $packets);
+			$ev->call();
+			if($ev->isCancelled()){
+				return false;
+			}
+			$packets = array_values($ev->getPackets());
+			if(count($packets) === 0){
+				return true;
+			}
+		}
+
+		$profileStartedAt = TickProfiler::startTimer();
+		Timings::$playerNetworkSend->startTiming();
+		try{
+			$protocolId = $this->getProtocolId();
+			$packetWriter = new ByteBufferWriter();
+			$packetBuffers = [];
+			foreach($packets as $packet){
+				$packetWriter->clear();
+				$packetBuffers[] = self::encodePacketTimed($packetWriter, $protocolId, $packet);
+			}
+
+			$batchWriter = new ByteBufferWriter();
+			PacketBatch::encodeRaw($batchWriter, $packetBuffers);
+			$payload = $batchWriter->getData();
+			if($this->enableCompression){
+				if($protocolId >= ProtocolInfo::PROTOCOL_1_20_60){
+					$payload = chr(CompressionAlgorithm::NONE) . $payload;
+				}else{
+					Timings::$playerNetworkSendCompressSessionBuffer->startTiming();
+					try{
+						$payload = $this->compressor->compress($payload);
+					}finally{
+						Timings::$playerNetworkSendCompressSessionBuffer->stopTiming();
+					}
+				}
+			}
+
+			// Encryption and transport enqueue must stay adjacent so cipher counters match wire order.
+			$this->sendEncoded($payload, true, []);
+			return true;
+		}finally{
+			Timings::$playerNetworkSend->stopTiming();
+			if($profileStartedAt !== 0){
+				TickProfiler::recordContributor("combat_network_flush", $this->getDisplayName(), $profileStartedAt);
+			}
+		}
 	}
 
 	/**

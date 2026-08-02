@@ -75,6 +75,7 @@ use pocketmine\math\Facing;
 use pocketmine\math\Vector3;
 use pocketmine\nbt\tag\IntTag;
 use pocketmine\nbt\tag\StringTag;
+use pocketmine\network\mcpe\CombatFeedback;
 use pocketmine\network\mcpe\convert\TypeConverter;
 use pocketmine\network\mcpe\NetworkBroadcastUtils;
 use pocketmine\network\mcpe\protocol\BlockActorDataPacket;
@@ -135,6 +136,7 @@ use function floor;
 use function get_class;
 use function gettype;
 use function is_a;
+use function is_array;
 use function is_object;
 use function max;
 use function microtime;
@@ -735,6 +737,21 @@ class World implements ChunkManager{
 	 * @param Player[]|null $players
 	 */
 	public function addSound(Vector3 $pos, Sound $sound, ?array $players = null) : void{
+		$this->addSoundInternal($pos, $sound, $players, null);
+	}
+
+	/**
+	 * Broadcasts a sound while collecting attacker/victim packets for approved combat feedback.
+	 *
+	 * @param Player[]|null $players
+	 * @internal
+	 */
+	public function addSoundWithCombatFeedback(Vector3 $pos, Sound $sound, CombatFeedback $combatFeedback, ?array $players = null) : void{
+		$this->addSoundInternal($pos, $sound, $players, $combatFeedback);
+	}
+
+	/** @param Player[]|null $players */
+	private function addSoundInternal(Vector3 $pos, Sound $sound, ?array $players, ?CombatFeedback $combatFeedback) : void{
 		$players ??= $this->getViewersForPosition($pos);
 
 		if(WorldSoundEvent::hasHandlers()){
@@ -746,6 +763,11 @@ class World implements ChunkManager{
 
 			$sound = $ev->getSound();
 			$players = $ev->getRecipients();
+		}
+
+		if($combatFeedback !== null){
+			$this->broadcastSoundWithCombatFeedback($pos, $sound, $this->filterViewersForPosition($pos, $players), $combatFeedback);
+			return;
 		}
 
 		if(($blockSound = ($sound instanceof BlockSound)) || $sound instanceof ProtocolSound){
@@ -777,6 +799,44 @@ class World implements ChunkManager{
 				}else{
 					NetworkBroadcastUtils::broadcastPackets($this->filterViewersForPosition($pos, $players), $pk);
 				}
+			}
+		}
+	}
+
+	/** @param Player[] $players */
+	private function broadcastSoundWithCombatFeedback(Vector3 $pos, Sound $sound, array $players, CombatFeedback $combatFeedback) : void{
+		if(($blockSound = ($sound instanceof BlockSound)) || $sound instanceof ProtocolSound){
+			if($blockSound){
+				$closure = function(TypeConverter $typeConverter) use ($sound, $pos) : array{
+					$sound->setBlockTranslator($typeConverter->getBlockTranslator());
+					return $sound->encode($pos);
+				};
+			}else{
+				/** @var ProtocolSound $sound */
+				$closure = function(TypeConverter $typeConverter) use ($sound, $pos) : array{
+					$sound->setProtocolId($typeConverter->getProtocolId());
+					return $sound->encode($pos);
+				};
+			}
+
+			[$typeConverters, $converterRecipients] = TypeConverter::sortByConverter($players);
+			foreach($typeConverters as $key => $typeConverter){
+				$packets = $closure($typeConverter);
+				if(count($packets) > 0){
+					$recipients = $combatFeedback->capturePackets($converterRecipients[$key], $packets);
+					if(count($recipients) > 0){
+						NetworkBroadcastUtils::broadcastPackets($recipients, $packets);
+					}
+				}
+			}
+			return;
+		}
+
+		$packets = $sound->encode($pos);
+		if(count($packets) > 0){
+			$players = $combatFeedback->capturePackets($players, $packets);
+			if(count($players) > 0){
+				NetworkBroadcastUtils::broadcastPackets($players, $packets);
 			}
 		}
 	}

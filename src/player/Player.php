@@ -111,6 +111,7 @@ use pocketmine\lang\Translatable;
 use pocketmine\math\Vector3;
 use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\IntTag;
+use pocketmine\network\mcpe\CombatFeedback;
 use pocketmine\network\mcpe\NetworkSession;
 use pocketmine\network\mcpe\protocol\AnimatePacket;
 use pocketmine\network\mcpe\protocol\MovePlayerPacket;
@@ -154,6 +155,7 @@ use function count;
 use function explode;
 use function floor;
 use function get_class;
+use function is_array;
 use function max;
 use function mb_strlen;
 use function microtime;
@@ -221,6 +223,8 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	}
 
 	protected ?NetworkSession $networkSession;
+	private ?CombatFeedback $activeCombatFeedback = null;
+	private ?EntityDamageByEntityEvent $activeCombatFeedbackEvent = null;
 
 	public bool $spawned = false;
 
@@ -1522,7 +1526,9 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 	public function setMotion(Vector3 $motion) : bool{
 		if(parent::setMotion($motion)){
 			$this->broadcastMotion();
-			$this->getNetworkSession()->sendDataPacket(SetActorMotionPacket::create($this->id, $motion, tick: 0));
+			if(!$this->isCapturingCombatFeedback()){
+				$this->getNetworkSession()->sendDataPacket(SetActorMotionPacket::create($this->id, $motion, tick: 0));
+			}
 
 			return true;
 		}
@@ -2055,7 +2061,22 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			$ev->setModifier($ev->getFinalDamage() / 2, EntityDamageEvent::MODIFIER_CRITICAL);
 		}
 
-		$entity->attack($ev);
+		$combatFeedback = new CombatFeedback($this, $entity);
+		$previousCombatFeedback = $this->activeCombatFeedback;
+		$previousCombatFeedbackEvent = $this->activeCombatFeedbackEvent;
+		$this->activeCombatFeedback = $combatFeedback;
+		$this->activeCombatFeedbackEvent = $ev;
+		try{
+			$entity->attack($ev);
+		}finally{
+			$this->activeCombatFeedback = $previousCombatFeedback;
+			$this->activeCombatFeedbackEvent = $previousCombatFeedbackEvent;
+		}
+		if(!$entity->isAlive() || $entity->isFlaggedForDespawn()){
+			// Death/removal packets may already be buffered and must remain ahead of motion feedback.
+			$combatFeedback->releaseNormally();
+			$combatFeedback = null;
+		}
 		$this->broadcastAnimation(new ArmSwingAnimation($this), $this->getViewers());
 
 		$soundPos = $entity->getPosition()->add(0, $entity->size->getHeight() / 2, 0);
@@ -2065,7 +2086,15 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 			}
 			return false;
 		}
-		$this->getWorld()->addSound($soundPos, new EntityAttackSound());
+		if($combatFeedback !== null){
+			try{
+				$this->getWorld()->addSoundWithCombatFeedback($soundPos, new EntityAttackSound(), $combatFeedback);
+			}finally{
+				$combatFeedback->sendImmediately();
+			}
+		}else{
+			$this->getWorld()->addSound($soundPos, new EntityAttackSound());
+		}
 
 		if($ev->getModifier(EntityDamageEvent::MODIFIER_CRITICAL) > 0 && $entity instanceof Living){
 			$entity->broadcastAnimation(new CriticalHitAnimation($entity));
@@ -2091,6 +2120,11 @@ class Player extends Human implements CommandSender, ChunkListener, IPlayer, Nev
 		}
 
 		return true;
+	}
+
+	/** @internal */
+	public function getActiveCombatFeedback(EntityDamageByEntityEvent $event) : ?CombatFeedback{
+		return $this->activeCombatFeedbackEvent === $event ? $this->activeCombatFeedback : null;
 	}
 
 	/**

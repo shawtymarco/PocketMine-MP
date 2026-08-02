@@ -54,8 +54,10 @@ use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\FloatTag;
 use pocketmine\nbt\tag\ListTag;
 use pocketmine\nbt\tag\ShortTag;
+use pocketmine\network\mcpe\CombatFeedback;
 use pocketmine\network\mcpe\EntityEventBroadcaster;
 use pocketmine\network\mcpe\NetworkBroadcastUtils;
+use pocketmine\network\mcpe\protocol\SetActorMotionPacket;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataCollection;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataFlags;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties;
@@ -110,6 +112,7 @@ abstract class Living extends Entity{
 	private const TAG_EFFECT_AMBIENT = "Ambient"; //TAG_Byte
 
 	protected int $attackTime = 0;
+	private ?CombatFeedback $activeCombatFeedback = null;
 
 	public int $deadTicks = 0;
 	protected int $maxDeadTicks = 25;
@@ -583,23 +586,32 @@ abstract class Living extends Entity{
 
 			$this->attackTime = $source->getAttackCooldown();
 
-			if($source instanceof EntityDamageByChildEntityEvent){
-				$e = $source->getChild();
-				if($e !== null){
-					$motion = $e->getMotion();
-					$this->knockBack($motion->x, $motion->z, $source->getKnockBack(), $source->getVerticalKnockBackLimit());
-				}
-			}elseif($source instanceof EntityDamageByEntityEvent){
-				$e = $source->getDamager();
-				if($e !== null){
-					$deltaX = $this->location->x - $e->location->x;
-					$deltaZ = $this->location->z - $e->location->z;
-					$this->knockBack($deltaX, $deltaZ, $source->getKnockBack(), $source->getVerticalKnockBackLimit());
-				}
+			$previousCombatFeedback = $this->activeCombatFeedback;
+			$this->activeCombatFeedback = null;
+			if($source instanceof EntityDamageByEntityEvent && ($damager = $source->getDamager()) instanceof Player){
+				$this->activeCombatFeedback = $damager->getActiveCombatFeedback($source);
 			}
+			try{
+				if($source instanceof EntityDamageByChildEntityEvent){
+					$e = $source->getChild();
+					if($e !== null){
+						$motion = $e->getMotion();
+						$this->knockBack($motion->x, $motion->z, $source->getKnockBack(), $source->getVerticalKnockBackLimit());
+					}
+				}elseif($source instanceof EntityDamageByEntityEvent){
+					$e = $source->getDamager();
+					if($e !== null){
+						$deltaX = $this->location->x - $e->location->x;
+						$deltaZ = $this->location->z - $e->location->z;
+						$this->knockBack($deltaX, $deltaZ, $source->getKnockBack(), $source->getVerticalKnockBackLimit());
+					}
+				}
 
-			if($this->isAlive()){
-				$this->doHitAnimation();
+				if($this->isAlive()){
+					$this->doHitAnimation();
+				}
+			}finally{
+				$this->activeCombatFeedback = $previousCombatFeedback;
 			}
 		}
 
@@ -609,7 +621,42 @@ abstract class Living extends Entity{
 	}
 
 	protected function doHitAnimation() : void{
-		$this->broadcastAnimation(new HurtAnimation($this));
+		$animation = new HurtAnimation($this);
+		if($this->activeCombatFeedback === null){
+			$this->broadcastAnimation($animation);
+			return;
+		}
+
+		$targets = $this->getViewers();
+		if($this instanceof Player && $this->spawned){
+			$targets[] = $this;
+		}
+		$packets = $animation->encode();
+		$targets = $this->activeCombatFeedback->capturePackets($targets, $packets);
+		if(count($targets) > 0){
+			NetworkBroadcastUtils::broadcastPackets($targets, $packets);
+		}
+	}
+
+	protected function broadcastMotion() : void{
+		if($this->activeCombatFeedback === null){
+			parent::broadcastMotion();
+			return;
+		}
+
+		$packet = SetActorMotionPacket::create($this->id, $this->getMotion(), tick: 0);
+		$targets = $this->hasSpawned;
+		if($this instanceof Player){
+			$targets[] = $this;
+		}
+		$targets = $this->activeCombatFeedback->capturePackets($targets, [$packet]);
+		if(count($targets) > 0){
+			NetworkBroadcastUtils::broadcastPackets($targets, [$packet]);
+		}
+	}
+
+	protected function isCapturingCombatFeedback() : bool{
+		return $this->activeCombatFeedback !== null;
 	}
 
 	public function knockBack(float $x, float $z, float $force = self::DEFAULT_KNOCKBACK_FORCE, ?float $verticalLimit = self::DEFAULT_KNOCKBACK_VERTICAL_LIMIT) : void{
