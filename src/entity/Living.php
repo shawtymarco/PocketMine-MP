@@ -57,7 +57,6 @@ use pocketmine\nbt\tag\ShortTag;
 use pocketmine\network\mcpe\CombatFeedback;
 use pocketmine\network\mcpe\EntityEventBroadcaster;
 use pocketmine\network\mcpe\NetworkBroadcastUtils;
-use pocketmine\network\mcpe\protocol\SetActorMotionPacket;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataCollection;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataFlags;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties;
@@ -636,27 +635,6 @@ abstract class Living extends Entity{
 		if(count($targets) > 0){
 			NetworkBroadcastUtils::broadcastPackets($targets, $packets);
 		}
-	}
-
-	protected function broadcastMotion() : void{
-		if($this->activeCombatFeedback === null){
-			parent::broadcastMotion();
-			return;
-		}
-
-		$packet = SetActorMotionPacket::create($this->id, $this->getMotion(), tick: 0);
-		$targets = $this->hasSpawned;
-		if($this instanceof Player){
-			$targets[] = $this;
-		}
-		$targets = $this->activeCombatFeedback->capturePackets($targets, [$packet]);
-		if(count($targets) > 0){
-			NetworkBroadcastUtils::broadcastPackets($targets, [$packet]);
-		}
-	}
-
-	protected function isCapturingCombatFeedback() : bool{
-		return $this->activeCombatFeedback !== null;
 	}
 
 	public function knockBack(float $x, float $z, float $force = self::DEFAULT_KNOCKBACK_FORCE, ?float $verticalLimit = self::DEFAULT_KNOCKBACK_VERTICAL_LIMIT) : void{

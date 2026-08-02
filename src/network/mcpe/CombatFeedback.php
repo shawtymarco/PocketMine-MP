@@ -29,7 +29,7 @@ use pocketmine\player\Player;
 use function spl_object_id;
 
 /**
- * Collects approved melee feedback for latency-prioritized delivery to the attacker and victim.
+ * Collects approved melee animation and sound feedback for latency-prioritized delivery.
  */
 final class CombatFeedback{
 

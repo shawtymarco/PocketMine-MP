@@ -24,8 +24,11 @@ declare(strict_types=1);
 namespace pocketmine\network\mcpe;
 
 use PHPUnit\Framework\TestCase;
+use pocketmine\entity\Entity;
+use pocketmine\entity\Living;
 use pocketmine\network\mcpe\protocol\ClientboundPacket;
 use pocketmine\player\Player;
+use ReflectionMethod;
 use function array_values;
 
 final class CombatFeedbackTest extends TestCase{
@@ -37,26 +40,32 @@ final class CombatFeedbackTest extends TestCase{
 		$victim = new CombatFeedbackTestPlayer($victimSession);
 		$observer = $this->createPlayerMock();
 
-		$motion = $this->createMock(ClientboundPacket::class);
+		$animation = $this->createMock(ClientboundPacket::class);
 		$sound = $this->createMock(ClientboundPacket::class);
 		$feedback = new CombatFeedback($attacker, $victim);
 
-		$remaining = $feedback->capturePackets([$attacker, $observer, $victim], [$motion]);
+		$remaining = $feedback->capturePackets([$attacker, $observer, $victim], [$animation]);
 		self::assertSame([$observer], array_values($remaining));
 		$remaining = $feedback->capturePackets([$attacker, $observer], [$sound]);
 		self::assertSame([$observer], array_values($remaining));
 
 		$attackerSession->expects(self::once())
 			->method('sendCombatPacketBatch')
-			->with([$motion, $sound])
+			->with([$animation, $sound])
 			->willReturn(true);
 		$victimSession->expects(self::once())
 			->method('sendCombatPacketBatch')
-			->with([$motion])
+			->with([$animation])
 			->willReturn(true);
 
 		$feedback->sendImmediately();
 		$feedback->sendImmediately();
+	}
+
+	public function testMotionBroadcastingKeepsEntityFifoOrdering() : void{
+		$method = new ReflectionMethod(Living::class, 'broadcastMotion');
+
+		self::assertSame(Entity::class, $method->getDeclaringClass()->getName());
 	}
 
 	private function createPlayerMock() : Player{
